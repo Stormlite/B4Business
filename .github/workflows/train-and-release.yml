@@ -1,0 +1,45 @@
+name: Train and Release Model
+
+on:
+  push:
+    branches: [ "master" ]
+  workflow_dispatch: {}
+
+jobs:
+  train-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Train model (fast)
+        run: |
+          python -m models.train --train --fast
+
+      - name: Create release
+        id: create_release
+        uses: actions/create-release@v1
+        with:
+          tag_name: model-${{ github.run_number }}
+          release_name: Model release ${{ github.run_number }}
+          body: "Automated model build from CI."
+          draft: false
+          prerelease: false
+
+      - name: Upload model artifact to release
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: models/over25_model.joblib
+          asset_name: over25_model.joblib
+          asset_content_type: application/octet-stream

@@ -128,7 +128,15 @@ def predict_for_date(model, history: pd.DataFrame, fixtures: pd.DataFrame, date:
         raise ValueError(f"No fixtures found for {date.date()}")
 
     fixture_features = prepare_fixture_features(target_fixtures, history)
-    X, _ = select_feature_matrix(fixture_features)
+    # Align prediction features to what the trained pipeline expects (if available)
+    feature_names = None
+    try:
+        if hasattr(model, "named_steps") and "scaler" in model.named_steps:
+            feature_names = getattr(model.named_steps["scaler"], "feature_names_in_", None)
+    except Exception:
+        feature_names = None
+
+    X, _ = select_feature_matrix(fixture_features, feature_names=feature_names)
     probabilities = model.predict_proba(X)[:, 1]
     results = target_fixtures.copy()
     results["over_2_5_probability"] = probabilities

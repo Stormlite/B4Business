@@ -228,9 +228,19 @@ def build_features(matches: pd.DataFrame, reference_date: datetime | None = None
     return features
 
 
-def select_feature_matrix(features: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
-    X = features[FEATURE_COLUMNS].copy()
-    y = features["over_2_5"].astype(int)
+def select_feature_matrix(features: pd.DataFrame, feature_names: list[str] | None = None) -> tuple[pd.DataFrame, pd.Series]:
+    # Allow selecting a custom ordered list of feature names (used at prediction time)
+    if feature_names is None:
+        feature_names = FEATURE_COLUMNS
+
+    X = features.copy()
+    # Ensure all requested features exist; if not, create them filled with 0.0
+    for fn in feature_names:
+        if fn not in X.columns:
+            X[fn] = 0.0
+
+    X = X[feature_names].copy()
+    y = features["over_2_5"].astype(int) if "over_2_5" in features.columns else pd.Series([0] * len(X))
     return X, y
 
 
@@ -262,6 +272,7 @@ def fixture_team_features(team_history: pd.DataFrame, fixture_date: datetime) ->
             "last3_goals_conceded": 0.0,
             "last3_goal_diff": 0.0,
             "last3_total_goals": 0.0,
+            "last5_total_goals": 0.0,
             "last5_over25_rate": 0.0,
             "rest_days": 7.0,
             "last3_shots": 0.0,
@@ -279,6 +290,7 @@ def fixture_team_features(team_history: pd.DataFrame, fixture_date: datetime) ->
         "last3_goals_conceded": last3_conceded,
         "last3_goal_diff": last3_goals - last3_conceded,
         "last3_total_goals": rolling_stats(subset["total_goals"], 3).iloc[-1],
+        "last5_total_goals": rolling_stats(subset["total_goals"], 5).iloc[-1],
         "last5_over25_rate": rolling_stats(subset["total_goals"].gt(2.5).astype(int), 5).iloc[-1],
         "rest_days": compute_rest_days(subset).iloc[-1] if len(subset) >= 1 else 7.0,
         "last3_shots": last3_shots,

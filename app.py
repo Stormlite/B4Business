@@ -2,6 +2,7 @@ import tempfile
 from pathlib import Path
 import pandas as pd
 import streamlit as st
+from config import FIXTURES_DIR
 
 # Safe imports
 try:
@@ -38,25 +39,39 @@ def load_uploaded_fixtures(uploaded_file):
 def main():
     st.set_page_config(page_title="Football Over 2.5 Goals Predictor", layout="wide")
     
-    st.title("⚽ Football Over 2.5 Goals Predictor")
-    st.write(
-        "Upload a fixtures CSV, choose a match date, and view predicted over-2.5 probabilities ranked from highest to lowest."
-    )
+        # 2. File Upload handling using Session State — prefer uploaded file, otherwise load fixtures folder
+        uploaded_file = st.file_uploader("Upload fixture CSV (optional)", type=["csv"])
 
-    # 1. Load ML assets safely
-    model = get_model()
-    history = get_history()
-
-    if model is None or history is None:
-        st.warning("⚠️ Application is missing required background ML files. Please check the logs above.")
-        return
-
-    # 2. File Upload handling using Session State
-    uploaded_file = st.file_uploader("Upload fixture CSV", type=["csv"])
-    
-    if uploaded_file is not None:
-        if "loaded_fixtures" not in st.session_state or st.session_state.get("file_name") != uploaded_file.name:
+        # If user uploaded a file, process and store it
+        if uploaded_file is not None:
+            if "loaded_fixtures" not in st.session_state or st.session_state.get("file_name") != uploaded_file.name:
+                try:
+                    with st.spinner("Processing uploaded fixtures..."):
+                        fixtures_df = load_uploaded_fixtures(uploaded_file)
+                        fixtures_df["date"] = pd.to_datetime(fixtures_df["date"])  # keep as Timestamp
+                        st.session_state["loaded_fixtures"] = fixtures_df
+                        st.session_state["file_name"] = uploaded_file.name
+                except Exception as exc:
+                    st.error(f"Unable to load fixtures: {exc}")
+                    return
+        else:
+            # Auto-load fixtures from the data/fixtures folder if present
             try:
+                fixtures_dir = FIXTURES_DIR
+                if fixtures_dir.exists():
+                    if "loaded_fixtures" not in st.session_state:
+                        with st.spinner(f"Loading fixtures from {fixtures_dir}..."):
+                            fixtures_df = load_fixtures(fixtures_dir)
+                            fixtures_df["date"] = pd.to_datetime(fixtures_df["date"])  # keep as Timestamp
+                            st.session_state["loaded_fixtures"] = fixtures_df
+                            st.session_state["file_name"] = str(fixtures_dir)
+                else:
+                    # Clear state if folder removed
+                    if "loaded_fixtures" in st.session_state:
+                        del st.session_state["loaded_fixtures"]
+            except Exception as exc:
+                st.error(f"Unable to load fixtures from folder: {exc}")
+                return
                 with st.spinner("Processing uploaded fixtures..."):
                     fixtures_df = load_uploaded_fixtures(uploaded_file)
                     # Sync dates to string format to prevent cross-library type mismatches
