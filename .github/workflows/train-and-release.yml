@@ -1,8 +1,10 @@
 name: Train and Release Model
 
 on:
-  push:
-    branches: [ "master" ]
+  # Run on a daily schedule (UTC) to build a full model automatically
+  schedule:
+    - cron: '0 1 * * *'
+  # Allow manual dispatch from the Actions UI
   workflow_dispatch: {}
 
 jobs:
@@ -22,9 +24,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Train model (fast)
+      - name: Train model (full)
         run: |
-          python -m models.train --train --fast
+          # Run full training (no --fast) to produce the release-quality model
+          python -m models.train --train
 
       - name: Create release
         id: create_release

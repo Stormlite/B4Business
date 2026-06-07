@@ -38,77 +38,97 @@ def load_uploaded_fixtures(uploaded_file):
 
 def main():
     st.set_page_config(page_title="Football Over 2.5 Goals Predictor", layout="wide")
-    
-        # 2. File Upload handling using Session State — prefer uploaded file, otherwise load fixtures folder
-        uploaded_file = st.file_uploader("Upload fixture CSV (optional)", type=["csv"])
 
-        # If user uploaded a file, process and store it
-        if uploaded_file is not None:
-            if "loaded_fixtures" not in st.session_state or st.session_state.get("file_name") != uploaded_file.name:
-                try:
-                    with st.spinner("Processing uploaded fixtures..."):
-                        fixtures_df = load_uploaded_fixtures(uploaded_file)
-                        fixtures_df["date"] = pd.to_datetime(fixtures_df["date"])  # keep as Timestamp
-                        st.session_state["loaded_fixtures"] = fixtures_df
-                        st.session_state["file_name"] = uploaded_file.name
-                except Exception as exc:
-                    st.error(f"Unable to load fixtures: {exc}")
-                    return
-        else:
-            # Auto-load fixtures from the data/fixtures folder if present
+    st.title("⚽ Football Over 2.5 Goals Predictor")
+    st.write(
+        "Upload a fixtures CSV (optional), choose a match date, and view predicted over-2.5 probabilities ranked from highest to lowest."
+    )
+
+    # 1. Load ML assets safely
+    model = get_model()
+    history = get_history()
+
+    # Sidebar controls: allow manual refresh of fixtures and model
+    st.sidebar.markdown("**Controls**")
+    if st.sidebar.button("Reload fixtures from data/fixtures/"):
+        try:
+            fixtures_df = load_fixtures(FIXTURES_DIR)
+            fixtures_df["date"] = pd.to_datetime(fixtures_df["date"]) 
+            st.session_state["loaded_fixtures"] = fixtures_df
+            st.success(f"Loaded fixtures from {FIXTURES_DIR}")
+        except Exception as exc:
+            st.error(f"Failed to load fixtures from folder: {exc}")
+
+    if st.sidebar.button("Refresh model (download if configured)"):
+        try:
             try:
-                fixtures_dir = FIXTURES_DIR
-                if fixtures_dir.exists():
-                    if "loaded_fixtures" not in st.session_state:
-                        with st.spinner(f"Loading fixtures from {fixtures_dir}..."):
-                            fixtures_df = load_fixtures(fixtures_dir)
-                            fixtures_df["date"] = pd.to_datetime(fixtures_df["date"])  # keep as Timestamp
-                            st.session_state["loaded_fixtures"] = fixtures_df
-                            st.session_state["file_name"] = str(fixtures_dir)
-                else:
-                    # Clear state if folder removed
-                    if "loaded_fixtures" in st.session_state:
-                        del st.session_state["loaded_fixtures"]
-            except Exception as exc:
-                st.error(f"Unable to load fixtures from folder: {exc}")
-                return
+                get_model.clear()
+            except Exception:
+                pass
+            # remove local model file to force download behavior if MODEL_DOWNLOAD_URL is set
+            try:
+                from config import MODEL_PATH
+                if Path(MODEL_PATH).exists():
+                    Path(MODEL_PATH).unlink()
+            except Exception:
+                pass
+            model = get_model()
+            if model is None:
+                st.error("Model reload failed; check logs and MODEL_DOWNLOAD_URL.")
+            else:
+                st.success("Model reloaded successfully.")
+        except Exception as exc:
+            st.error(f"Failed to refresh model: {exc}")
+
+    # 2. File Upload handling using Session State — prefer uploaded file, otherwise load fixtures folder
+    uploaded_file = st.file_uploader("Upload fixture CSV (optional)", type=["csv"])
+
+    # If user uploaded a file, process and store it
+    if uploaded_file is not None:
+        if "loaded_fixtures" not in st.session_state or st.session_state.get("file_name") != uploaded_file.name:
+            try:
                 with st.spinner("Processing uploaded fixtures..."):
                     fixtures_df = load_uploaded_fixtures(uploaded_file)
-                    # Sync dates to string format to prevent cross-library type mismatches
-                    fixtures_df["date"] = pd.to_datetime(fixtures_df["date"]).dt.strftime('%Y-%m-%d')
+                    fixtures_df["date"] = pd.to_datetime(fixtures_df["date"])  # keep as Timestamp
                     st.session_state["loaded_fixtures"] = fixtures_df
                     st.session_state["file_name"] = uploaded_file.name
             except Exception as exc:
                 st.error(f"Unable to load fixtures: {exc}")
                 return
     else:
-        # Clear state if user removes file
-        if "loaded_fixtures" in st.session_state:
-            del st.session_state["loaded_fixtures"]
+        # Auto-load fixtures from the data/fixtures folder if present
+        try:
+            fixtures_dir = FIXTURES_DIR
+            if fixtures_dir.exists():
+                if "loaded_fixtures" not in st.session_state:
+                    with st.spinner(f"Loading fixtures from {fixtures_dir}..."):
+                        fixtures_df = load_fixtures(fixtures_dir)
+                        fixtures_df["date"] = pd.to_datetime(fixtures_df["date"])  # keep as Timestamp
+                        st.session_state["loaded_fixtures"] = fixtures_df
+                        st.session_state["file_name"] = str(fixtures_dir)
+            else:
+                # Clear state if folder removed
+                if "loaded_fixtures" in st.session_state:
+                    del st.session_state["loaded_fixtures"]
+        except Exception as exc:
+            st.error(f"Unable to load fixtures from folder: {exc}")
+            return
 
     if "loaded_fixtures" not in st.session_state:
         st.info("💡 Please upload a fixture CSV with columns: `date`, `competition`, `home_team`, `away_team` to begin.")
         return
 
     fixtures = st.session_state["loaded_fixtures"]
-    unique_dates = sorted(fixtures["date"].unique())
+    unique_dates = sorted(fixtures["date"].dropna().unique())
     
     if not unique_dates:
         st.error("No valid fixture dates found in the uploaded file. Check your 'date' column format.")
         return
 
     # 3. Interactive Date Selection
-    selected_date_str = st.selectbox("Select fixture date", unique_dates, index=0)
-    
-    # Crucial Fix: Convert selected date back to the type your predict_for_date function expects
-    # If your pipeline expects a datetime object or string, this ensures it matches perfectly.
-    try:
-        # Check if underlying pipeline needs string or Timestamp (we fall back safely)
-        selected_date = pd.to_datetime(selected_date_str).date() 
-    except Exception:
-        selected_date = selected_date_str
+    selected_date = st.selectbox("Select fixture date", unique_dates, index=0)
 
-    st.markdown(f"### 📋 Showing predictions for **{selected_date_str}**")
+    st.markdown(f"### 📋 Showing predictions for **{pd.to_datetime(selected_date).strftime('%Y-%m-%d')}**")
 
     # 4. Generate Predictions
     try:
@@ -135,7 +155,7 @@ def main():
         st.download_button(
             label="📥 Download predictions as CSV",
             data=csv,
-            file_name=f"over25_predictions_{selected_date_str}.csv",
+            file_name=f"over25_predictions_{pd.to_datetime(selected_date).strftime('%Y-%m-%d')}.csv",
             mime="text/csv",
         )
     else:
