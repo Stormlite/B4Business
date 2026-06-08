@@ -1,3 +1,9 @@
+import sys
+import os
+
+# Force Python to recognize the project root directory for module resolution
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
 import streamlit as st
 import datetime
 import pandas as pd

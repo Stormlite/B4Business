@@ -1,160 +1,3 @@
-# import argparse
-# from datetime import datetime
-# from pathlib import Path
-# from typing import List
-
-# import pandas as pd
-# import requests
-# import duckdb
-
-# from config import DATA_DIR, DB_PATH, LEAGUE_CODES, SEASONS
-
-# BASE_URL = "https://www.football-data.co.uk/mmz4281"
-
-# CSV_COLUMNS = [
-#     "Date",
-#     "HomeTeam",
-#     "AwayTeam",
-#     "FTHG",
-#     "FTAG",
-#     "FTR",
-#     "HTHG",
-#     "HTAG",
-#     "HTR",
-#     "Referee",
-#     "HS",
-#     "AS",
-#     "HST",
-#     "AST",
-#     "HF",
-#     "AF",
-#     "HC",
-#     "AC",
-#     "HY",
-#     "AY",
-#     "HR",
-#     "AR",
-#     "BWH",
-#     "BWD",
-#     "BWA",
-#     "PSH",
-#     "PSD",
-#     "PSA",
-#     "WHH",
-#     "WHD",
-#     "WHA",
-#     "VCH",
-#     "VCD",
-#     "VCA",
-#     "Bb1X2",
-#     "BbMxH",
-#     "BbAvH",
-#     "BbMxD",
-#     "BbAvD",
-#     "BbMxA",
-#     "BbAvA",
-#     "BbOU",
-#     "BbMx>2.5",
-#     "BbAv>2.5",
-#     "BbMx<2.5",
-#     "BbAv<2.5",
-#     "BbAH",
-#     "BbAHh",
-#     "BbMxAHH",
-#     "BbAvAHH",
-#     "BbMxAHA",
-#     "BbAvAHA",
-# ]
-
-
-# def ensure_paths() -> None:
-#     DATA_DIR.mkdir(parents=True, exist_ok=True)
-
-
-# def download_csv(season: str, league_code: str) -> Path:
-#     season_dir = DATA_DIR / season
-#     season_dir.mkdir(parents=True, exist_ok=True)
-#     file_name = f"{league_code}.csv"
-#     target_path = season_dir / file_name
-#     if target_path.exists():
-#         return target_path
-
-#     url = f"{BASE_URL}/{season}/{file_name}"
-#     response = requests.get(url, timeout=20)
-#     response.raise_for_status()
-#     target_path.write_bytes(response.content)
-#     return target_path
-
-
-# def load_csv(path: Path, league_code: str, season: str) -> pd.DataFrame:
-#     df = pd.read_csv(path, dayfirst=True, parse_dates=["Date"], encoding="latin1", on_bad_lines="skip")
-#     if df.empty:
-#         return df
-
-#     columns = {"Date": "date", "HomeTeam": "home_team", "AwayTeam": "away_team", "FTHG": "home_goals", "FTAG": "away_goals", "FTR": "result"}
-#     df = df.rename(columns=columns)
-#     keep = [c for c in ["date", "home_team", "away_team", "home_goals", "away_goals", "HS", "AS", "HST", "AST", "BbAv>2.5", "BbOU"] if c in df.columns]
-#     df = df[keep]
-#     df = df.dropna(subset=["date", "home_team", "away_team", "home_goals", "away_goals"])
-#     df["competition"] = LEAGUE_CODES.get(league_code, league_code)
-#     df["season"] = season
-#     df["total_goals"] = df["home_goals"] + df["away_goals"]
-#     if "BbAv>2.5" in df.columns:
-#         df["odds_over_2_5"] = pd.to_numeric(df["BbAv>2.5"], errors="coerce")
-#     else:
-#         df["odds_over_2_5"] = pd.NA
-
-#     df = df.sort_values("date").reset_index(drop=True)
-#     # rename shot columns if present
-#     if "HS" in df.columns:
-#         df = df.rename(columns={"HS": "home_shots", "AS": "away_shots", "HST": "home_sot", "AST": "away_sot"})
-
-#     out_cols = ["date", "competition", "season", "home_team", "away_team", "home_goals", "away_goals", "total_goals", "odds_over_2_5"]
-#     for col in ["home_shots", "away_shots", "home_sot", "away_sot"]:
-#         if col in df.columns:
-#             out_cols.append(col)
-
-#     return df[out_cols]
-
-
-# def build_match_database() -> None:
-#     ensure_paths()
-#     records: List[pd.DataFrame] = []
-#     for season in SEASONS:
-#         for league_code in LEAGUE_CODES:
-#             try:
-#                 csv_path = download_csv(season, league_code)
-#                 df = load_csv(csv_path, league_code, season)
-#                 if not df.empty:
-#                     records.append(df)
-#             except Exception as exc:
-#                 print(f"Skipping {league_code} {season}: {exc}")
-
-#     if not records:
-#         raise RuntimeError("No datasets were loaded. Check internet connectivity and league metadata.")
-
-#     all_matches = pd.concat(records, ignore_index=True)
-#     con = duckdb.connect(DB_PATH)
-#     con.register("all_matches", all_matches)
-#     con.execute("CREATE OR REPLACE TABLE matches AS SELECT * FROM all_matches")
-#     con.execute("COPY matches TO '" + str(DATA_DIR / "matches.parquet") + "' (FORMAT PARQUET)")
-#     con.close()
-#     print(f"Built database with {len(all_matches)} matches at {DB_PATH}")
-
-
-# def main() -> None:
-#     parser = argparse.ArgumentParser(description="Download and build football match data for over 2.5 prediction.")
-#     parser.add_argument("--build-db", action="store_true", help="Download league CSVs and build the match database.")
-#     args = parser.parse_args()
-
-#     if args.build_db:
-#         build_match_database()
-
-
-# if __name__ == "__main__":
-#     main()
-
-
 import os
 import argparse
 import datetime
@@ -173,8 +16,6 @@ def fetch_todays_fixtures_from_api():
         return pd.DataFrame()
 
     headers = {"X-Auth-Token": api_key}
-    
-    # Get today's date formatted as YYYY-MM-DD
     today = datetime.date.today().strftime("%Y-%m-%d")
     
     params = {
@@ -196,12 +37,11 @@ def fetch_todays_fixtures_from_api():
         print("ℹ️ No matches found scheduled for today.")
         return pd.DataFrame()
 
-    # Parse JSON properties safely into flat rows
     parsed_matches = []
     for m in matches:
         parsed_matches.append({
             "match_id": m.get("id"),
-            "match_date": m.get("utcDate")[:10], # Extract YYYY-MM-DD
+            "match_date": m.get("utcDate")[:10],
             "competition": m.get("competition", {}).get("name"),
             "home_team": m.get("homeTeam", {}).get("name"),
             "away_team": m.get("awayTeam", {}).get("name"),
@@ -215,11 +55,11 @@ def fetch_todays_fixtures_from_api():
 def update_database(df, table_name="historical_matches"):
     """Saves or updates rows inside the DuckDB file."""
     if df.empty:
+        print("⚠️ update_database received an empty dataframe. Skipping write.")
         return
         
     conn = duckdb.connect(DB_PATH)
     
-    # Create the target table if it does not already exist
     conn.execute(f"""
         CREATE TABLE IF NOT EXISTS {table_name} (
             match_id INTEGER PRIMARY KEY,
@@ -233,43 +73,99 @@ def update_database(df, table_name="historical_matches"):
         )
     """)
     
-    # Register the dataframe locally into DuckDB context
     conn.register("df_temp", df)
-    
-    # Use an upsert syntax (INSERT OR REPLACE) to prevent duplicate entries
     conn.execute(f"INSERT OR REPLACE INTO {table_name} SELECT * FROM df_temp")
     conn.close()
     print(f"✅ Successfully wrote {len(df)} rows into DuckDB table '{table_name}'.")
 
 def build_initial_historical_db():
-    """Fallback mechanism to load initial history from your existing CSV paths."""
-    print("📦 Building initial match database using available CSV sources...")
-    # Target your existing CSV setup inside data/ folder
-    csv_dir = "data/"
-    csv_files = [f for f in os.listdir(csv_dir) if f.endswith('.csv')]
+    """Recursively crawls through all project folders to compile season CSV datasets."""
+    print("📦 Deep-scanning project workspace for season CSV historical data files...")
     
-    if not csv_files:
-        print("❌ No baseline historical CSV files found in data/ directory to initialize.")
+    csv_files_found = []
+    
+    for root_dir, dirs, files in os.walk("."):
+        # Ignore virtual environments, git configs, internal caches, and the explicit fixtures directory
+        if any(ignored in root_dir for ignored in [".venv", "venv", ".git", "__pycache__", ".github"]):
+            continue
+            
+        for file in files:
+            if file.endswith('.csv'):
+                # 🌟 FIX: Skip sample forecasting or upcoming match files
+                if "fixtures" in file.lower() or "sample" in file.lower():
+                    continue
+                full_path = os.path.join(root_dir, file)
+                csv_files_found.append(full_path)
+
+    print(f"🔍 Discovered a total of {len(csv_files_found)} target CSV historical source files.")
+
+    if not csv_files_found:
+        print("❌ Error: Could not find any valid season CSV files.")
         return
 
     all_dfs = []
-    for file in csv_files:
-        path = os.path.join(csv_dir, file)
+    for file_path in csv_files_found:
+        print(f"📖 Parsing match data rows from: {file_path}...")
         try:
-            df_csv = pd.read_csv(path)
-            # Ensure basic column compliance
+            df_csv = pd.read_csv(file_path)
+            
+            # Map structural columns used by football-data.co.uk datasets
+            rename_map = {
+                'id': 'match_id', 'id_match': 'match_id',
+                'date': 'match_date', 'Date': 'match_date',
+                'HomeTeam': 'home_team', 'Home': 'home_team',
+                'AwayTeam': 'away_team', 'Away': 'away_team',
+                'FTHG': 'home_score', 'home_goals': 'home_score',
+                'FTAG': 'away_score', 'away_goals': 'away_score',
+                'Div': 'competition', 'League': 'competition'
+            }
+            df_csv = df_csv.rename(columns=rename_map)
+            
+            # Convert date columns containing slashes (DD/MM/YY) to clean standard ISO text formats (YYYY-MM-DD)
+            if 'match_date' in df_csv.columns:
+                try:
+                    df_csv['match_date'] = pd.to_datetime(df_csv['match_date'], errors='coerce', dayfirst=True).dt.strftime('%Y-%m-%d')
+                except Exception:
+                    pass
+
             required_cols = ["match_id", "match_date", "competition", "home_team", "away_team", "home_score", "away_score", "status"]
-            # Fill missing optional columns if needed
-            for col in required_cols:
-                if col not in df_csv.columns:
-                    df_csv[col] = None
-            all_dfs.append(df_csv[required_cols])
+            
+            # Auto-generate a sequential unique primary key sequence if missing from the raw CSV
+            if "match_id" not in df_csv.columns or df_csv["match_id"].isnull().all():
+                file_hash = abs(hash(os.path.basename(file_path))) % 1000000
+                df_csv["match_id"] = [file_hash + i for i in range(len(df_csv))]
+            
+            # Build target matrix dataframe dictionary
+            df_cleaned = pd.DataFrame()
+            df_cleaned["match_id"] = df_csv["match_id"]
+            df_cleaned["match_date"] = df_csv["match_date"] if "match_date" in df_csv.columns else "Unknown"
+            df_cleaned["competition"] = df_csv["competition"] if "competition" in df_csv.columns else "Unknown"
+            df_cleaned["home_team"] = df_csv["home_team"] if "home_team" in df_csv.columns else "Unknown"
+            df_cleaned["away_team"] = df_csv["away_team"] if "away_team" in df_csv.columns else "Unknown"
+            
+            # 🌟 FIX: Force explicit integer evaluation on scores, substituting empty data cells with 0
+            df_cleaned["home_score"] = pd.to_numeric(df_csv["home_score"], errors='coerce').fillna(0).astype(int)
+            df_cleaned["away_score"] = pd.to_numeric(df_csv["away_score"], errors='coerce').fillna(0).astype(int)
+            df_cleaned["status"] = df_csv["status"] if "status" in df_csv.columns else "FINISHED"
+            
+            all_dfs.append(df_cleaned[required_cols])
         except Exception as e:
-            print(f"Skipping corrupt or mismatched file {file}: {e}")
+            print(f"⚠️ Skipping structural variation on file {file_path}: {e}")
 
     if all_dfs:
-        combined_df = pd.concat(all_dfs, ignore_index=True).drop_duplicates(subset=["match_id"])
-        update_database(combined_df, "historical_matches")
+        combined_df = pd.concat(all_dfs, ignore_index=True)
+        
+        # Clean null entries and deduplicate records across league season boundaries
+        combined_df = combined_df.dropna(subset=["match_id"])
+        combined_df["match_id"] = combined_df["match_id"].astype(int)
+        combined_df = combined_df.drop_duplicates(subset=["match_id"])
+        
+        if not combined_df.empty:
+            update_database(combined_df, "historical_matches")
+        else:
+            print("⚠️ Match data matrix compiled empty after filtering rows.")
+    else:
+        print("❌ Could not compile any structured tables out of discovered files.")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Football Predictor Data Pipeline CLI")
@@ -278,12 +174,11 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
     
-    if args.build-db:
+    if args.build_db:
         build_initial_historical_db()
-    elif args.fetch-today:
+    elif args.fetch_today:
         df_today = fetch_todays_fixtures_from_api()
         if not df_today.empty:
-            # We save live fixtures either to historical_matches or a staging table
             update_database(df_today, "historical_matches")
     else:
         parser.print_help()
