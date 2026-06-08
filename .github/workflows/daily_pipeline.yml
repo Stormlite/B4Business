@@ -1,0 +1,42 @@
+name: Daily Prediction and Retraining Pipeline
+
+on:
+  schedule:
+    - cron: '0 4 * * *' # Runs everyday at 4:00 AM UTC
+  workflow_dispatch: # Allows manual trigger from the GitHub Actions tab
+
+jobs:
+  run-pipeline:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Fetch Today's Matches & Update DB
+        env:
+          FOOTBALL_API_APIKEY: ${{ secrets.FOOTBALL_API_APIKEY }}
+        run: |
+          python -m data.collector --fetch-today
+
+      - name: Retrain Model Automatically
+        run: |
+          python -m models.train --train
+
+      - name: Commit and Push Changes
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/matches.duckdb models/over25_model.joblib
+          git diff --quiet && git diff --staged --quiet || git commit -m "Automated Daily Update: DB & Model [skip ci]"
+          git push
