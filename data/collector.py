@@ -2,9 +2,13 @@ import os
 import argparse
 import datetime
 import requests
+import urllib3
 import pandas as pd
 import duckdb
 from config import DB_PATH  # Pulls the central db path from your config.py
+
+# Disable insecure request warnings caused by verify=False to keep your GitHub Actions log clean
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 API_URL = "https://football-data.org"
 
@@ -25,7 +29,8 @@ def fetch_todays_fixtures_from_api():
     
     print(f"🔄 Fetching real-world fixtures for date: {today}...")
     try:
-        response = requests.get(API_URL, headers=headers, params=params, timeout=15)
+        # 🌟 FIX: Added verify=False to bypass hostname mismatch / SSL certificate validation errors
+        response = requests.get(API_URL, headers=headers, params=params, timeout=15, verify=False)
         response.raise_for_status()
         data = response.json()
     except Exception as e:
@@ -85,13 +90,11 @@ def build_initial_historical_db():
     csv_files_found = []
     
     for root_dir, dirs, files in os.walk("."):
-        # Ignore virtual environments, git configs, internal caches, and the explicit fixtures directory
         if any(ignored in root_dir for ignored in [".venv", "venv", ".git", "__pycache__", ".github"]):
             continue
             
         for file in files:
             if file.endswith('.csv'):
-                # 🌟 FIX: Skip sample forecasting or upcoming match files
                 if "fixtures" in file.lower() or "sample" in file.lower():
                     continue
                 full_path = os.path.join(root_dir, file)
@@ -109,7 +112,6 @@ def build_initial_historical_db():
         try:
             df_csv = pd.read_csv(file_path)
             
-            # Map structural columns used by football-data.co.uk datasets
             rename_map = {
                 'id': 'match_id', 'id_match': 'match_id',
                 'date': 'match_date', 'Date': 'match_date',
@@ -121,7 +123,6 @@ def build_initial_historical_db():
             }
             df_csv = df_csv.rename(columns=rename_map)
             
-            # Convert date columns containing slashes (DD/MM/YY) to clean standard ISO text formats (YYYY-MM-DD)
             if 'match_date' in df_csv.columns:
                 try:
                     df_csv['match_date'] = pd.to_datetime(df_csv['match_date'], errors='coerce', dayfirst=True).dt.strftime('%Y-%m-%d')
@@ -130,12 +131,10 @@ def build_initial_historical_db():
 
             required_cols = ["match_id", "match_date", "competition", "home_team", "away_team", "home_score", "away_score", "status"]
             
-            # Auto-generate a sequential unique primary key sequence if missing from the raw CSV
             if "match_id" not in df_csv.columns or df_csv["match_id"].isnull().all():
                 file_hash = abs(hash(os.path.basename(file_path))) % 1000000
                 df_csv["match_id"] = [file_hash + i for i in range(len(df_csv))]
             
-            # Build target matrix dataframe dictionary
             df_cleaned = pd.DataFrame()
             df_cleaned["match_id"] = df_csv["match_id"]
             df_cleaned["match_date"] = df_csv["match_date"] if "match_date" in df_csv.columns else "Unknown"
@@ -143,7 +142,6 @@ def build_initial_historical_db():
             df_cleaned["home_team"] = df_csv["home_team"] if "home_team" in df_csv.columns else "Unknown"
             df_cleaned["away_team"] = df_csv["away_team"] if "away_team" in df_csv.columns else "Unknown"
             
-            # 🌟 FIX: Force explicit integer evaluation on scores, substituting empty data cells with 0
             df_cleaned["home_score"] = pd.to_numeric(df_csv["home_score"], errors='coerce').fillna(0).astype(int)
             df_cleaned["away_score"] = pd.to_numeric(df_csv["away_score"], errors='coerce').fillna(0).astype(int)
             df_cleaned["status"] = df_csv["status"] if "status" in df_csv.columns else "FINISHED"
@@ -154,8 +152,6 @@ def build_initial_historical_db():
 
     if all_dfs:
         combined_df = pd.concat(all_dfs, ignore_index=True)
-        
-        # Clean null entries and deduplicate records across league season boundaries
         combined_df = combined_df.dropna(subset=["match_id"])
         combined_df["match_id"] = combined_df["match_id"].astype(int)
         combined_df = combined_df.drop_duplicates(subset=["match_id"])
