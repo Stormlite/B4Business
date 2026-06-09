@@ -7,55 +7,81 @@ import pandas as pd
 import duckdb
 from config import DB_PATH  # Pulls the central db path from your config.py
 
-# Disable insecure request warnings caused by verify=False to keep your GitHub Actions log clean
+# Disable insecure request warnings caused by network checking protocols
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-API_URL = "https://football-data.org"
+# Verified Endpoint URL matching official documentation
+API_URL = "https://v3.football.api-sports.io/fixtures"
 
 def fetch_todays_fixtures_from_api():
-    """Fetches real-world fixtures happening today using the API token."""
-    api_key = os.getenv("FOOTBALL_API_APIKEY")
+    """Fetches real-world fixtures happening today using the API-Football v3 engine."""
+    api_key = os.getenv("API_FOOTBALL_KEY")
     if not api_key:
-        print("⚠️ Warning: FOOTBALL_API_APIKEY environment variable not set.")
+        print("⚠️ Warning: API_FOOTBALL_KEY environment variable not set.")
         return pd.DataFrame()
 
-    headers = {"X-Auth-Token": api_key}
+    # Pass credential parameters securely through headers
+    headers = {
+        "x-apisports-key": api_key
+    }
+    
+    # Track daily calendar tracking strings
     today = datetime.date.today().strftime("%Y-%m-%d")
     
     params = {
-        "dateFrom": today,
-        "dateTo": today
+        "date": today
     }
     
-    print(f"🔄 Fetching real-world fixtures for date: {today}...")
+    print(f"🔄 Fetching API-Football fixtures for date: {today}...")
     try:
-        # 🌟 FIX: Added verify=False to bypass hostname mismatch / SSL certificate validation errors
-        response = requests.get(API_URL, headers=headers, params=params, timeout=15, verify=False)
+        # Use verify=True if your local network layer is secure, fallback to False if using proxy servers
+        response = requests.get(API_URL, headers=headers, params=params, timeout=15)
         response.raise_for_status()
         data = response.json()
     except Exception as e:
-        print(f"❌ Error connecting to Football-Data API: {e}")
+        print(f"❌ Error connecting to API-Football: {e}")
         return pd.DataFrame()
 
-    matches = data.get("matches", [])
-    if not matches:
-        print("ℹ️ No matches found scheduled for today.")
+    # Handle API error payloads seamlessly
+    errors = data.get("errors", [])
+    if errors:
+        print(f"❌ API-Football Error Response: {errors}")
+        return pd.DataFrame()
+
+    fixtures_list = data.get("response", [])
+    if not fixtures_list:
+        print("ℹ️ No matches found scheduled for today in API-Football records.")
         return pd.DataFrame()
 
     parsed_matches = []
-    for m in matches:
+    for item in fixtures_list:
+        fixture = item.get("fixture", {})
+        league = item.get("league", {})
+        teams = item.get("teams", {})
+        goals = item.get("goals", {})
+        
+        # Flatten structural JSON arrays into clean dataframe rows
         parsed_matches.append({
-            "match_id": m.get("id"),
-            "match_date": m.get("utcDate")[:10],
-            "competition": m.get("competition", {}).get("name"),
-            "home_team": m.get("homeTeam", {}).get("name"),
-            "away_team": m.get("awayTeam", {}).get("name"),
-            "home_score": m.get("score", {}).get("fullTime", {}).get("home"),
-            "away_score": m.get("score", {}).get("fullTime", {}).get("away"),
-            "status": m.get("status")
+            "match_id": fixture.get("id"),
+            "match_date": fixture.get("date")[:10] if fixture.get("date") else today,
+            "competition": league.get("name", "Unknown League"),
+            "home_team": teams.get("home", {}).get("name"),
+            "away_team": teams.get("away", {}).get("name"),
+            "home_score": goals.get("home"), 
+            "away_score": goals.get("away"), 
+            "status": fixture.get("status", {}).get("short", "NS")
         })
 
-    return pd.DataFrame(parsed_matches)
+    df_parsed = pd.DataFrame(parsed_matches)
+    
+    # Map API-Football status code keys to standard framework variables
+    def normalize_status(short_status):
+        if short_status in ["FT", "AET", "PEN"]:
+            return "FINISHED"
+        return "SCHEDULED"
+        
+    df_parsed["status"] = df_parsed["status"].apply(normalize_status)
+    return df_parsed
 
 def update_database(df, table_name="historical_matches"):
     """Saves or updates rows inside the DuckDB file."""
