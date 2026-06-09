@@ -21,23 +21,26 @@ def dispatch_whatsapp_alerts():
     print("📡 Running valuation scanner for high-probability targets...")
     df = score_todays_fixtures()
     
-    if df.empty:
+    if df is None or df.empty:
         print("ℹ️ Notification engine: No games scheduled to analyze today.")
         return
 
-    # Filter for matches with high confidence (> 75%)
-    high_value_games = df[df["over_2_5_probability"] >= 0.75]
+    # Filter for matches with high confidence in EITHER Over 2.5 or BTTS markets (>= 75%)
+    high_value_games = df[(df["over_2_5_probability"] >= 0.75) | (df["btts_probability"] >= 0.75)]
     
     if high_value_games.empty:
         print("ℹ️ Notification engine: No matches crossed the 75% selection threshold today.")
         return
 
     # Build message content body strings dynamically
-    msg_body = "⚽ *DAILY OVER 2.5 GOALS CONFIDENCE PICKS* ⚽\n\n"
+    msg_body = "⚽ *DAILY HIGH-CONFIDENCE PICKS (≥75%)* ⚽\n\n"
     for _, row in high_value_games.iterrows():
-        pct = row['over_2_5_probability'] * 100
+        o25_pct = row['over_2_5_probability'] * 100
+        btts_pct = row['btts_probability'] * 100
+        
         msg_body += f"🔥 *{row['home_team']} vs {row['away_team']}*\n"
-        msg_body += f"📈 Probability: *{pct:.2f}%*\n\n"
+        msg_body += f"📈 Over 2.5 Prob: *{o25_pct:.2f}%*\n"
+        msg_body += f"🥅 BTTS Prob: *{btts_pct:.2f}%*\n\n"
         
     msg_body += "🤖 _Automated forecast compiled daily via serverless ML pipeline._"
 

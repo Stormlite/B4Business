@@ -25,7 +25,8 @@ def score_todays_fixtures():
     feature_cols = [
         'home_rolling_scored', 'home_rolling_conceded', 
         'away_rolling_scored', 'away_rolling_conceded',
-        'combined_rolling_scoring_power', 'combined_rolling_defensive_leakage'
+        'combined_rolling_scoring_power', 'combined_rolling_defensive_leakage',
+        'combined_btts_trend'
     ]
     
     X_live = df_today[feature_cols]
