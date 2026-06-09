@@ -11,6 +11,8 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # 🌟 Forces Git to download full branch history to make rebasing successful
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -50,6 +52,18 @@ jobs:
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Stage the explicit dual model artifacts and analytical log changes
           git add data/matches.duckdb models/over25_model.joblib models/btts_model.joblib
-          git diff --quiet && git diff --staged --quiet || git commit -m "Automated Daily Update: DB & Model [skip ci]"
-          git push
+          
+          # Check if changes actually exist before committing
+          if ! git diff --quiet || ! git diff --staged --quiet; then
+            git commit -m "Automated Daily Update: DB & Models [skip ci]"
+            
+            # 🌟 THE CRITICAL FIX: Pull down any recent manual VS Code commits and rebase before pushing
+            git pull origin master --rebase -X theirs
+            
+            git push origin master
+          else
+            print "ℹ️ No adjustments or profile updates detected across database files. Skipping commit node."
+          fi
