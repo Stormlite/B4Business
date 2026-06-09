@@ -33,6 +33,19 @@ jobs:
         run: |
           python -m models.train --train
 
+      - name: Run Historical Backtest Evaluation Check
+        run: |
+          python scripts/backtest.py
+
+      - name: Dispatch High-Value WhatsApp Alerts to Phone
+        env:
+          API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
+          TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
+          TWILIO_AUTH_TOKEN: ${{ secrets.TWILIO_AUTH_TOKEN }}
+          TARGET_WHATSAPP_NUMBER: ${{ secrets.TARGET_WHATSAPP_NUMBER }}
+        run: |
+          python scripts/notify.py
+
       - name: Commit and Push Changes
         run: |
           git config --global user.name "github-actions[bot]"
