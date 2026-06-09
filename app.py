@@ -1,296 +1,145 @@
-# # import streamlit as st
-# # import datetime
-# # import pandas as pd
-# # from models.predict import score_todays_fixtures
-
-# # # --- PAGE SETUP & UI COSMETICS ---
-# # st.set_page_config(
-# #     page_title="Football Over 2.5 Goals Predictor", 
-# #     page_icon="⚽", 
-# #     layout="wide"
-# # )
-
-# # # Render main web application headers
-# # st.title("⚽ Live Football Over 2.5 Goals Predictor")
-# # st.markdown("""
-# # This web application displays automated, live probabilities that scheduled football fixtures will cross **Over 2.5 total match goals**. 
-# # The system runs completely serverless, refreshing game lists and retraining parameters daily using cloud automation workflows.
-# # """)
-
-# # st.write("---")
-
-# # # --- CORE BACKEND EXECUTION ENGINE ---
-# # # Track real-time calendar date context variables
-# # today_date = datetime.date.today().strftime("%Y-%m-%d")
-
-# # # Create two visual columns for layout organization
-# # col_info, col_spacer = st.columns([2, 1])
-
-# # with col_info:
-# #     st.subheader(f"📅 Showing Live Match Predictions for Today: `{today_date}`")
-
-# # # Fetch and execute inference metrics from our pipeline using safe loading elements
-# # with st.spinner("Analyzing active real-world fixtures and processing model math..."):
-# #     try:
-# #         # Pull live rankings compiled from models/predict.py
-# #         df_predictions = score_todays_fixtures()
-        
-# #         if not df_predictions.empty:
-# #             # Format numbers visually for easier readability
-# #             df_display = df_predictions.copy()
-# #             df_display["over_2_5_probability"] = df_display["over_2_5_probability"].map(lambda x: f"{x * 100:.2f}%")
-# #             df_display["prediction"] = df_display["prediction"].map(lambda x: "🔥 Yes (Over 2.5)" if x == 1 else "🛑 No (Under 2.5)")
-            
-# #             # Rename column headers for clean display
-# #             df_display.columns = ["Home Team", "Away Team", "Over 2.5 Probability", "Model Verdict"]
-            
-# #             # Render interactive styled data grid view across the interface
-# #             st.dataframe(df_display, use_container_width=True)
-            
-# #             st.write("") # Margin buffer spacer
-            
-# #             # Recreate export CSV capability using automated data downloads
-# #             csv_data = df_predictions.to_csv(index=False).encode('utf-8')
-# #             st.download_button(
-# #                 label="📥 Download Today's Predictions as CSV",
-# #                 data=csv_data,
-# #                 file_name=f"predictions_{today_date}.csv",
-# #                 mime="text/csv",
-# #                 use_container_width=False
-# #             )
-            
-# #         else:
-# #             st.info("ℹ️ No scheduled fixtures available for today's monitored competitions. Check back tomorrow morning!")
-            
-# #     except Exception as e:
-# #         st.error(f"❌ An error occurred while parsing predictions: {e}")
-# #         st.info("💡 Ensure your GitHub Action pipeline has run successfully at least once to create the core model and database files.")
-
-# # # --- SIDEBAR INFORMATION FOOTER PANEL ---
-# # with st.sidebar:
-# #     st.header("⚙️ Operational Status")
-# #     st.success("✅ System Status: Active")
-# #     st.info(f"🕒 Current Web Server Date: {today_date}")
-    
-# #     st.write("---")
-# #     st.markdown("""
-# #     ### 🛠️ Architecture
-# #     - **Hosting:** Streamlit Community Cloud
-# #     - **Database Engine:** DuckDB
-# #     - **Automation Engine:** GitHub Actions (`cron` scheduling)
-# #     - **API Provider:** Football-Data.org
-# #     """)
-# #     st.caption("Model parameters are automatically retrained daily to account for changing team form and league trends.")
-
-
-# import sys
-# import os
-
-# sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-
-# import streamlit as st
-# import datetime
-# import pandas as pd
-# from models.predict import score_todays_fixtures
-
-# st.set_page_config(page_title="Football Over 2.5 Goals Predictor", page_icon="⚽", layout="wide")
-
-# st.title("⚽ Live Football Over 2.5 Goals Predictor")
-# st.markdown("This interface displays probabilities that scheduled football fixtures will cross **Over 2.5 total match goals**.")
-
-# st.write("---")
-# today_date = datetime.date.today().strftime("%Y-%m-%d")
-
-# with st.spinner("Analyzing active real-world fixtures and processing model math..."):
-#     try:
-#         df_predictions = score_todays_fixtures()
-        
-#         if not df_predictions.empty:
-#             # 🌟 UPGRADE 1: Interactive Multi-Select Filter Sidebar Menu Control Layout
-#             all_teams = sorted(list(set(df_predictions["home_team"].tolist() + df_predictions["away_team"].tolist())))
-#             selected_teams = st.multiselect("🔍 Filter specific team cards out of today's slate:", options=all_teams)
-            
-#             df_filtered = df_predictions.copy()
-#             if selected_teams:
-#                 df_filtered = df_filtered[
-#                     df_filtered["home_team"].isin(selected_teams) | df_filtered["away_team"].isin(selected_teams)
-#                 ]
-
-#             # Formats displays columns 
-#             df_display = df_filtered.copy()
-#             df_display["over_2_5_probability"] = df_display["over_2_5_probability"].map(lambda x: f"{x * 100:.2f}%")
-#             df_display["prediction"] = df_display["prediction"].map(lambda x: "🔥 Yes (Over 2.5)" if x == 1 else "🛑 No (Under 2.5)")
-#             df_display.columns = ["Home Team", "Away Team", "Over 2.5 Probability", "Model Verdict"]
-
-#             # 🌟 UPGRADE 2: Color Highlight High-Value Targets Green (>75%)
-#             def highlight_picks(row):
-#                 try:
-#                     prob_val = float(row["Over 2.5 Probability"].replace('%', ''))
-#                     if prob_val >= 75.0:
-#                         return ['background-color: #d4edda; color: #155724; font-weight: bold'] * len(row)
-#                 except ValueError:
-#                     pass
-#                 return [''] * len(row)
-
-#             styled_df = df_display.style.apply(highlight_picks, axis=1)
-#             st.dataframe(styled_df, use_container_width=True)
-            
-#             csv_data = df_filtered.to_csv(index=False).encode('utf-8')
-#             st.download_button(label="📥 Download Filtered Selections as CSV", data=csv_data, file_name=f"predictions_{today_date}.csv", mime="text/csv")
-#         else:
-#             st.info("ℹ️ No scheduled fixtures available for today.")
-#     except Exception as e:
-#         st.error(f"❌ An error occurred while parsing predictions: {e}")
-
-# with st.sidebar:
-#     st.header("⚙️ Operational Status")
-#     st.success("✅ System Status: Active")
-#     st.info(f"🕒 Server Date: {today_date}")
-
 import sys
 import os
 
-# Ensure root paths load accurately in cloud environments
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 import streamlit as st
 import datetime
 import pandas as pd
+import duckdb
 from models.predict import score_todays_fixtures
+from config import DB_PATH
 
-# --- 🎨 PRODUCTION BRANDING & STYLING ---
-st.set_page_config(
-    page_title="Over2.5 | Predictive Analytics Dashboard", 
-    page_icon="⚽", 
-    layout="wide"
-)
+st.set_page_config(page_title="Over2.5 & BTTS | Analytics Dashboard", page_icon="⚽", layout="wide")
 
-# Premium dark/light unified component styling blocks
+# Custom Styles
 st.markdown("""
     <style>
     .main-title { font-size: 2.6rem !important; font-weight: 800 !important; color: #1E293B; margin-bottom: 0.5rem; }
-    .subtitle { font-size: 1.1rem !important; color: #64748B; margin-bottom: 2rem; }
-    .kpi-card { background-color: #F8FAFC; border: 1px solid #E2E8F0; padding: 1.25rem; border-radius: 0.75rem; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+    .subtitle { font-size: 1.1rem !important; color: #64748B; margin-bottom: 1.5rem; }
+    .kpi-card { background-color: #F8FAFC; border: 1px solid #E2E8F0; padding: 1.25rem; border-radius: 0.75rem; text-align: center; }
     .kpi-val { font-size: 1.75rem !important; font-weight: 700 !important; color: #0F172A; }
-    .kpi-lbl { font-size: 0.85rem !important; color: #64748B; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
+    .kpi-lbl { font-size: 0.85rem !important; color: #64748B; text-transform: uppercase; font-weight: 600; }
     </style>
 """, unsafe_allow_html=True)
 
-# --- 🚀 HEADER ARCHITECTURE ---
-st.markdown('<div class="main-title">⚽ Over2.5 Predictive Analytics</div>', unsafe_allow_html=True)
-st.markdown('<div class="subtitle">Production-grade automated forecasting machine learning models evaluating over/under goal metrics for today\'s fixtures.</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-title">⚽ Over2.5 & BTTS Predictive Analytics</div>', unsafe_allow_html=True)
+st.markdown('<div class="subtitle">Multi-market machine learning dashboard tracking goals and team form variables in real-time.</div>', unsafe_allow_html=True)
 
 today_date = datetime.date.today().strftime("%Y-%m-%d")
 
-# --- ⚡ CORE DATA PARSING ENGINE ---
+# --- 🌟 HISTORICAL ACCURACY CHART ENGINE ---
+st.subheader("📈 Historical League Goal Trends (Rolling Analytics)")
+conn = duckdb.connect(DB_PATH)
+try:
+    # Query database to build monthly trend breakdown
+    trend_df = conn.execute("""
+        SELECT 
+            SUBSTR(match_date, 1, 7) as month,
+            AVG(CASE WHEN (home_score + away_score) > 2.5 THEN 1.0 ELSE 0.0 END) * 100 as over_25_rate,
+            AVG(CASE WHEN home_score > 0 AND away_score > 0 THEN 1.0 ELSE 0.0 END) * 100 as btts_rate
+        FROM historical_matches 
+        WHERE status='FINISHED' AND match_date != 'Unknown' AND match_date IS NOT NULL
+        GROUP BY month ORDER BY month ASC
+    """).df()
+    
+    if not trend_df.empty:
+        # Format for Streamlit Native Line Charting
+        chart_data = trend_df.set_index('month')
+        chart_data.columns = ['Over 2.5 Goals %', 'BTTS %']
+        st.line_chart(chart_data)
+    else:
+        st.info("Insufficient finished data rows to chart trends yet.")
+except Exception as e:
+    st.caption(f"Historical trend chart loading: Database initializing... ({e})")
+finally:
+    conn.close()
+
+st.write("---")
+
+# --- CORE INFERENCE SLATE CONTAINER ---
+st.subheader(f"📅 Live Predictive Ratings for Today: `{today_date}`")
+
 with st.spinner("Executing mathematical array inferences against live data feeds..."):
     try:
         df_predictions = score_todays_fixtures()
         
         if not df_predictions.empty:
-            # 📊 KPI SCORECARD METRIC ROW
+            # KPI Cards
             total_fixtures = len(df_predictions)
-            high_conf_picks = len(df_predictions[df_predictions["over_2_5_probability"] >= 0.75])
-            avg_prob = df_predictions["over_2_5_probability"].mean() * 100
+            o25_picks = len(df_predictions[df_predictions["over_2_5_probability"] >= 0.75])
+            btts_picks = len(df_predictions[df_predictions["btts_probability"] >= 0.75])
 
             kpi1, kpi2, kpi3 = st.columns(3)
             with kpi1:
-                st.markdown(f'<div class="kpi-card"><div class="kpi-val">{total_fixtures}</div><div class="kpi-lbl">Fixtures Monitored</div></div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="kpi-card"><div class="kpi-val">{total_fixtures}</div><div class="kpi-lbl">Total Fixtures Slate</div></div>', unsafe_allow_html=True)
             with kpi2:
-                st.markdown(f'<div class="kpi-card"><div class="kpi-val">{high_conf_picks}</div><div class="kpi-lbl">High Confidence Selections (≥75%)</div></div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="kpi-card"><div class="kpi-val">{o25_picks}</div><div class="kpi-lbl">High Over 2.5 Picks (≥75%)</div></div>', unsafe_allow_html=True)
             with kpi3:
-                st.markdown(f'<div class="kpi-card"><div class="kpi-val">{avg_prob:.1f}%</div><div class="kpi-lbl">Average Over 2.5 Slate Weight</div></div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="kpi-card"><div class="kpi-val">{btts_picks}</div><div class="kpi-lbl">High BTTS Picks (≥75%)</div></div>', unsafe_allow_html=True)
             
             st.write("")
-            st.write("")
-
-            # 🔍 INTERACTIVE FILTER CONTROLS
+            
+            # Interactive Filter Elements
             all_teams = sorted(list(set(df_predictions["home_team"].tolist() + df_predictions["away_team"].tolist())))
+            selected_teams = st.multiselect("🔍 Filter specific team profiles:", options=all_teams, placeholder="Search team names...")
             
-            f_col1, f_col2 = st.columns([3, 1])
-            with f_col1:
-                selected_teams = st.multiselect("🔍 Filter specific team profiles:", options=all_teams, placeholder="Search team names...")
-            with f_col2:
-                # Filter rows using an interactive confidence slider block
-                min_prob = st.slider("📈 Minimum Probability Threshold:", min_value=0, max_value=100, value=0, step=5)
-
-            # Apply UI data selection overrides dynamically
             df_filtered = df_predictions.copy()
             if selected_teams:
                 df_filtered = df_filtered[df_filtered["home_team"].isin(selected_teams) | df_filtered["away_team"].isin(selected_teams)]
-            df_filtered = df_filtered[df_filtered["over_2_5_probability"] >= (min_prob / 100)]
 
-            # 🛠️ DATA PRESENTATION & CONDITIONAL DESIGN STRINGS
-            df_display = df_filtered.copy()
-            df_display["over_2_5_probability"] = df_display["over_2_5_probability"].map(lambda x: f"{x * 100:.2f}%")
-            df_display["prediction"] = df_display["prediction"].map(lambda x: "🔥 Yes (Over 2.5)" if x == 1 else "🛑 No (Under 2.5)")
-            df_display.columns = ["Home Team", "Away Team", "Over 2.5 Probability", "Model Verdict"]
+            # Presentation Format Layout Configuration
+            df_display = pd.DataFrame()
+            df_display["Home Team"] = df_filtered["home_team"]
+            df_display["Away Team"] = df_filtered["away_team"]
+            df_display["Over 2.5 Prob"] = df_filtered["over_2_5_probability"].map(lambda x: f"{x * 100:.1f}%")
+            df_display["Over 2.5 Verdict"] = df_filtered["over_2_5_verdict"].map(lambda x: "🔥 Yes" if x == 1 else "🛑 Under")
+            df_display["BTTS Prob"] = df_filtered["btts_probability"].map(lambda x: f"{x * 100:.1f}%")
+            df_display["BTTS Verdict"] = df_filtered["btts_verdict"].map(lambda x: "🔥 Yes" if x == 1 else "🛑 No")
 
-            # High value targets are styled with premium soft emerald green tints
-            def style_production_table(row):
+            # Dual Market Visual Highlights Styles
+            def style_multi_market_table(row):
+                styles = [''] * len(row)
                 try:
-                    prob_float = float(row["Over 2.5 Probability"].replace('%', ''))
-                    if prob_float >= 75.0:
-                        return ['background-color: #E6F4EA; color: #137333; font-weight: 700; border-left: 4px solid #137333;'] * len(row)
-                    elif prob_float <= 35.0:
-                        return ['background-color: #FCE8E6; color: #C5221F;'] * len(row)
+                    o25_val = float(row["Over 2.5 Prob"].replace('%', ''))
+                    btts_val = float(row["BTTS Prob"].replace('%', ''))
+                    
+                    # If both high value features align, give row deep emerald highlight accent
+                    if o25_val >= 75.0 and btts_val >= 75.0:
+                        return ['background-color: #D1E7DD; color: #0F5132; font-weight: bold; font-size:15px;'] * len(row)
+                    
+                    # Individual Highlight Conditions
+                    if o25_val >= 75.0:
+                        styles[2] = 'background-color: #E6F4EA; color: #137333; font-weight: bold;'
+                        styles[3] = 'background-color: #E6F4EA; color: #137333; font-weight: bold;'
+                    if btts_val >= 75.0:
+                        styles[4] = 'background-color: #E8F0FE; color: #1A73E8; font-weight: bold;'
+                        styles[5] = 'background-color: #E8F0FE; color: #1A73E8; font-weight: bold;'
                 except ValueError:
                     pass
-                return [''] * len(row)
+                return styles
 
-            # Render data matrix view
-            if not df_display.empty:
-                styled_grid = df_display.style.apply(style_production_table, axis=1)
-                st.dataframe(styled_grid, use_container_width=True, hide_index=True)
-                
-                # Clean file export options
-                csv_bytes = df_filtered.to_csv(index=False).encode('utf-8')
-                st.download_button(
-                    label="📥 Export Filtered Forecast Matrix (CSV)", 
-                    data=csv_bytes, 
-                    file_name=f"over25_predictions_{today_date}.csv", 
-                    mime="text/csv"
-                )
-            else:
-                st.info("No fixtures match your slider or search token criteria.")
-
-        else:
-            st.info("ℹ️ No active scheduled fixtures discovered for today's tracked competitions. Check back tomorrow morning!")
+            styled_grid = df_display.style.apply(style_multi_market_table, axis=1)
+            st.dataframe(styled_grid, use_container_width=True, hide_index=True)
             
+            csv_bytes = df_filtered.to_csv(index=False).encode('utf-8')
+            st.download_button(label="📥 Export Dual-Market Prediction Matrix (CSV)", data=csv_bytes, file_name=f"predictions_{today_date}.csv", mime="text/csv")
+        else:
+            st.info("ℹ️ No active scheduled fixtures discovered for today.")
     except Exception as e:
         st.error(f"❌ Core Application Interface Error: {e}")
 
-# --- 🤓 THE "NERDY DETAILS" ACCORDION TOGGLE ---
+# Expandable Nerdy Toggle Content Blueprint
 st.write("---")
-with st.expander("🤓 View Nerdy Details, Model Parameters, and Operational Context"):
-    st.markdown("### 🛠️ Architecture Blueprint & Data Engineering Profile")
-    st.write(f"Current Local Execution Date: `{today_date}`")
-    
-    n_col1, n_col2 = st.columns(2)
-    with n_col1:
-        st.markdown("""
-        **Data Processing Infrastructure:**
-        - **Ingestion Engine:** API-Football v3 REST Protocols
-        - **Analytical Processing Core:** DuckDB Storage Engine
-        - **Orchestration:** Serverless GitHub Actions `cron` scheduling engine running daily at 04:00 UTC.
-        - **Pipeline Targets:** Pulls real-time rosters, updates historical records, and automates model file writebacks.
-        """)
-    with n_col2:
-        st.markdown("""
-        **Machine Learning Framework Details:**
-        - **Classification Model:** Scikit-Learn `RandomForestClassifier`
-        - **Hyperparameter Profiles:** 100 Trees, Balanced Class Weights, Maximum Tree Depth: 6.
-        - **Engineered Dimensions Vector:**
-          1. `home_rolling_scored` | 2. `home_rolling_conceded`
-          3. `away_rolling_scored` | 4. `away_rolling_conceded`
-          5. `combined_rolling_scoring_power` | 6. `combined_rolling_defensive_leakage`
-        """)
-        
-    st.markdown("### 🔔 Connected Integration Services")
-    st.info("💬 **Twilio Messaging Node:** Active — Daily alerts push automated high-confidence selections directly to your WhatsApp terminal if probabilities exceed the 75% valuation floor.")
+with st.expander("🤓 View Multi-Market Model Variables & Architecture Details"):
+    st.markdown("""
+    **Dual Classification Node Specifications:**
+    - **Model Alpha (Over 2.5):** Scikit-Learn `RandomForestClassifier` targeting total match goals count arrays > 2.5.
+    - **Model Beta (BTTS):** Scikit-Learn `RandomForestClassifier` targeting matches where both `home_score > 0` and `away_score > 0`.
+    - **Feature Arrays Loaded:** Base goal rolling statistics combined with the new `combined_btts_trend` team tracking vector.
+    """)
 
-# --- SIDEBAR OPERATIONAL TELEMETRY ---
 with st.sidebar:
-    st.header("⚙️ System Telemetry")
-    st.success("● Cloud Core: Operational")
-    st.caption("The predictive array models retrain and optimize automatically every 24 hours to balance dynamic variations in team form metrics.")
+    st.header("⚙️ Multi-Model Telemetry")
+    st.success("● Over 2.5 Model: Online")
+    st.success("● BTTS Model: Online")
