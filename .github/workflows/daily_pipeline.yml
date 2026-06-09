@@ -12,13 +12,13 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # 🌟 Forces Git to download full branch history to make rebasing successful
+          fetch-depth: 0 # Forces Git to download full branch history to make rebasing successful
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-          cache: 'false'
+          # 🌟 FIXED: Removed the cache line completely to bypass the string support error
 
       - name: Install Dependencies
         run: |
@@ -60,10 +60,10 @@ jobs:
           if ! git diff --quiet || ! git diff --staged --quiet; then
             git commit -m "Automated Daily Update: DB & Models [skip ci]"
             
-            # 🌟 THE CRITICAL FIX: Pull down any recent manual VS Code commits and rebase before pushing
+            # Pull down any recent manual VS Code commits and rebase before pushing
             git pull origin master --rebase -X theirs
             
             git push origin master
           else
-            print "ℹ️ No adjustments or profile updates detected across database files. Skipping commit node."
+            echo "ℹ️ No adjustments or profile updates detected across database files. Skipping commit node."
           fi
