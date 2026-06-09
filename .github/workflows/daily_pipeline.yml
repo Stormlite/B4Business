@@ -25,7 +25,7 @@ jobs:
 
       - name: Fetch Today's Matches & Update DB
         env:
-          FOOTBALL_API_APIKEY: ${{ secrets.FOOTBALL_API_APIKEY }}
+          API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
         run: |
           python -m data.collector --fetch-today
 
