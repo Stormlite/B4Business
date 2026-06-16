@@ -18,8 +18,15 @@ def load_raw_data_from_db():
     conn.close()
     
     df['total_goals'] = df['home_score'] + df['away_score']
+    
+    # Core Targets
     df['target_over25'] = np.where(df['total_goals'] > 2.5, 1, 0)
     df['target_btts'] = np.where((df['home_score'] > 0) & (df['away_score'] > 0), 1, 0)
+    
+    # 🌟 NEW: 3-Way Match Outcome Targets
+    df['target_home_win'] = np.where(df['home_score'] > df['away_score'], 1, 0)
+    df['target_draw'] = np.where(df['home_score'] == df['away_score'], 1, 0)
+    df['target_away_win'] = np.where(df['home_score'] < df['away_score'], 1, 0)
     
     return df
 
@@ -61,8 +68,6 @@ def calculate_rolling_stats(df, window=5):
     
     df['combined_rolling_scoring_power'] = df['home_rolling_scored'] + df['away_rolling_scored']
     df['combined_rolling_defensive_leakage'] = df['home_rolling_conceded'] + df['away_rolling_conceded']
-    
-    # 🌟 THE CRITICAL FIX: Add combined_btts_trend feature required by the trained model
     df['combined_btts_trend'] = (df['home_rolling_scored'] * 0.5) + (df['away_rolling_scored'] * 0.5)
     
     return df
@@ -75,7 +80,6 @@ def generate_feature_pipeline(extract_live_today_only=False):
         
     df_features = calculate_rolling_stats(df_raw)
     
-    # 🌟 Feature columns must perfectly match the array used during model training
     feature_columns = [
         'home_rolling_scored', 'home_rolling_conceded', 
         'away_rolling_scored', 'away_rolling_conceded',
@@ -88,5 +92,6 @@ def generate_feature_pipeline(extract_live_today_only=False):
         df_today = df_features[df_features['match_date'] == today_str]
         return df_today[['match_id', 'match_date', 'home_team', 'away_team'] + feature_columns]
         
+    # 🌟 NEW: Include 3-way match outcome targets in training output arrays
     df_train = df_features[df_features['status'] == 'FINISHED'].dropna(subset=['target_over25', 'target_btts'])
-    return df_train[['match_id', 'match_date', 'target_over25', 'target_btts'] + feature_columns]
+    return df_train[['match_id', 'match_date', 'target_over25', 'target_btts', 'target_home_win', 'target_draw', 'target_away_win'] + feature_columns]
