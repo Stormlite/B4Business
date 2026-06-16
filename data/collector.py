@@ -10,7 +10,7 @@ from config import DB_PATH
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # API-Football Base URL
-API_URL = "https://api-sports.io"
+API_URL = "https://v3.football.api-sports.io/fixtures"
 
 def fetch_live_market_odds():
     """Fetches real-world scheduled soccer matches and live bookmaker odds using your verified format."""
