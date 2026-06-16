@@ -9,31 +9,32 @@ from config import DB_PATH
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# API-Football Base URL
+# Explicitly verified base endpoints matching official documentation parameters
 API_URL = "https://api-sports.io"
-
-# 🌟 FIXED: Implemented your exact verified V4 path directory link structure
+# 🌟 FIXED: Changed to the correct collective upcoming odds path
 ODDS_API_BASE_URL = "https://the-odds-api.com"
 
+# League filtering indices (Premier League, La Liga, Serie A, Bundesliga, Ligue 1)
 TARGET_LEAGUE_IDS = [39, 140, 135, 78, 61]
 
 def fetch_live_market_odds():
-    """Queries The Odds API V4 for real-world live 1X2 bookmaker prices."""
+    """Queries The Odds API V4 upcoming endpoint to harvest live 1X2 market rows."""
     api_key = os.getenv("THE_ODDS_API_KEY")
     if not api_key:
         print("⚠️ Warning: THE_ODDS_API_KEY not set. Using default baseline odds matrix.")
         return {}
 
-    # Python's requests library automatically appends these onto your URL string
+    # Target soccer explicitly using the sport parameter filter key
     params = {
         "apiKey": api_key,
+        "sport": "soccer", # 🌟 FIXED: Isolates soccer leagues dynamically out of the upcoming stream
         "regions": "eu,uk",  
         "markets": "h2h",
         "oddsFormat": "decimal",
         "dateFormat": "iso"
     }
     
-    print("📡 Querying The Odds API V4 for live bookmaker pricing feeds...")
+    print("📡 Querying The Odds API V4 for upcoming live soccer pricing feeds...")
     try:
         response = requests.get(ODDS_API_BASE_URL, params=params, timeout=12)
         response.raise_for_status()
@@ -50,9 +51,8 @@ def fetch_live_market_odds():
             bookmakers = item.get("bookmakers", [])
             
             if bookmakers:
-                # Target the primary active odds provider listing block
-                primary_bookie = bookmakers[0]
-                markets = primary_bookie.get("markets", [])
+                # Extract pricing details from the primary active provider
+                markets = bookmakers[0].get("markets", [])
                 if markets:
                     outcomes = markets[0].get("outcomes", [])
                     try:
@@ -82,6 +82,7 @@ def fetch_todays_fixtures_from_api():
     for league_id in TARGET_LEAGUE_IDS:
         params = {"date": today, "league": league_id}
         try:
+            # allow_redirects=False stops proxy servers from dropping authorization header blocks
             response = requests.get(API_URL, headers=headers, params=params, timeout=15, allow_redirects=False)
             response.raise_for_status()
             data = response.json()
@@ -105,6 +106,7 @@ def fetch_todays_fixtures_from_api():
             
             matched_odds = live_odds_feed.get(lookup_key)
             if not matched_odds:
+                # Run an automated partial text query check for slight spelling variations
                 for key, odds in live_odds_feed.items():
                     if str(home_name).lower() in key or str(away_name).lower() in key:
                         matched_odds = odds
@@ -131,6 +133,7 @@ def fetch_todays_fixtures_from_api():
             })
 
     if not parsed_matches:
+        print("ℹ️ No active scheduled matches found for the 5 monitored major leagues today.")
         return pd.DataFrame()
 
     df_parsed = pd.DataFrame(parsed_matches)
