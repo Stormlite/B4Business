@@ -27,6 +27,7 @@ jobs:
       - name: Fetch Today's Matches & Update DB
         env:
           API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
+          THE_ODDS_API_KEY: ${{ secrets.THE_ODDS_API_KEY }} # 🌟 Securely linked odds aggregation key
         run: |
           python -m data.collector --fetch-today
 
@@ -52,7 +53,7 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           
-          # 🌟 FORCE TRACKING ALL ARTIFACTS AND LOG ARRAYS
+          # Force tracking all artifacts and model binaries
           git add data/matches.duckdb models/over25_model.joblib models/btts_model.joblib models/outcome_model.joblib
           
           if ! git diff --quiet || ! git diff --staged --quiet; then
