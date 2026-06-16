@@ -18,7 +18,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-          # 🌟 FIXED: Removed the cache line completely to bypass the string support error
 
       - name: Install Dependencies
         run: |
@@ -48,38 +47,21 @@ jobs:
         run: |
           python scripts/notify.py
 
-      # - name: Commit and Push Changes
-      #   run: |
-      #     git config --global user.name "github-actions[bot]"
-      #     git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          
-      #     # Stage the explicit dual model artifacts and analytical log changes
-      #     git add data/matches.duckdb models/over25_model.joblib models/btts_model.joblib
-          
-      #     # Check if changes actually exist before committing
-      #     if ! git diff --quiet || ! git diff --staged --quiet; then
-      #       git commit -m "Automated Daily Update: DB & Models [skip ci]"
-            
-      #       # Pull down any recent manual VS Code commits and rebase before pushing
-      #       git pull origin master --rebase -X theirs
-            
-      #       git push origin master
-      #     else
-      #       echo "ℹ️ No adjustments or profile updates detected across database files. Skipping commit node."
-      #     fi
-      # ... (Keep all setup steps up to retraining the same)
-
       - name: Commit and Push Changes
         run: |
           git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@://github.com"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
           
-          # 🌟 UPDATED: Added models/outcome_model.joblib to the commit step array
+          # 🌟 FORCE TRACKING ALL ARTIFACTS AND LOG ARRAYS
           git add data/matches.duckdb models/over25_model.joblib models/btts_model.joblib models/outcome_model.joblib
           
           if ! git diff --quiet || ! git diff --staged --quiet; then
             git commit -m "Automated Daily Update: Multi-Market Predictive Engines [skip ci]"
+            
+            # Rebase clean to prevent conflict rejections
             git pull origin master --rebase -X theirs
+            
             git push origin master
+          else
+            echo "ℹ️ No adjustments or profile updates detected across database files. Skipping commit node."
           fi
-
