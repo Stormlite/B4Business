@@ -1,167 +1,202 @@
 # Football Over-2.5 Goals Predictor
 
-Predicts the probability that a football match will finish with over 2.5 total goals. The project trains a time-aware model on historical fixtures and exposes a Streamlit web UI to score future fixtures.
+A Python-based prediction system for football matches, focused on over/under goals and multi-market match scoring. The repository combines:
+- historical data ingestion into DuckDB,
+- feature engineering from team rolling statistics,
+- machine learning model training for Over 2.5 goals, BTTS, and 1X2 outcomes,
+- a Streamlit dashboard for live prediction display.
 
-## Quick summary
+## What this repository contains
 
-- Language: Python 3.9+ (tested in a venv)
-- Main UI: `app.py` (Streamlit)
-- Training: `models/train.py` → saves `models/over25_model.joblib`
-- Prediction API: `models/predict.py` (CLI) and `models/predict` functions used by `app.py`
+### Core files
+- `app.py`
+  - Streamlit web application.
+  - Loads live prediction scores via `models.predict.score_todays_fixtures()`.
+  - Displays probabilities for Over 2.5, BTTS, 1X2 outcomes, plus live odds and match kickoff information.
 
-## Repository layout
+- `config.py`
+  - Central path definitions for model artifacts and the DuckDB file.
+  - Exposes `MODEL_PATH`, `BTTS_MODEL_PATH`, `OUTCOME_MODEL_PATH`, and `DB_PATH`.
 
-- `app.py` — Streamlit web interface (uploads fixtures, selects date, shows predictions)
-- `config.py` — central paths and constants (`MODEL_PATH`, `DB_PATH`, `MODEL_DIR`)
-- `data/` — data ingestion and fixtures
-	- `collector.py` — build the `matches.duckdb` DB from CSV sources
-- `features/engineer.py` — feature engineering functions (form, H2H, rolling stats)
-- `models/`
-	- `train.py` — training entrypoint (fast/full modes)
-	- `predict.py` — loading model + prediction helpers used by both CLI and Streamlit
-	- `over25_model.joblib` — trained model artifact (may be generated locally)
-- `scripts/` — utilities: backtesting, evaluation, deployment helpers
-- Other: `requirements.txt`, `README.md`, small tmp scripts for diagnostics
+### Data ingestion
+- `data/collector.py`
+  - Fetches today's fixtures from API-Football v3 using `API_FOOTBALL_KEY`.
+  - Fetches matcher odds from The Odds API v4 using `THE_ODDS_API_KEY`.
+  - Writes or updates `historical_matches` in the DuckDB file at `config.DB_PATH`.
+  - Provides:
+    - `fetch_live_market_odds()`
+    - `fetch_todays_fixtures_from_api()`
+    - `update_database()`
+  - Also includes a CLI entrypoint for `--build-db` and `--fetch-today`.
 
-## Quickstart (local)
+### Feature engineering
+- `features/engineer.py`
+  - Loads raw historical match results from DuckDB.
+  - Calculates team rolling statistics for home/away scoring and conceded goals.
+  - Builds these features for both
+    - historical training rows, and
+    - today’s live prediction rows.
+  - Features used by the models:
+    - `home_rolling_scored`
+    - `home_rolling_conceded`
+    - `away_rolling_scored`
+    - `away_rolling_conceded`
+    - `combined_rolling_scoring_power`
+    - `combined_rolling_defensive_leakage`
+    - `combined_btts_trend`
+
+### Modeling
+- `models/train.py`
+  - Training pipeline for three classifiers:
+    - Over 2.5 goals (`models/over25_model.joblib`)
+    - Both Teams To Score (`models/btts_model.joblib`)
+    - 3-way match outcome (`models/outcome_model.joblib`)
+  - Reads engineered features from `features/engineer.generate_feature_pipeline()`.
+  - Trains `RandomForestClassifier` models with balanced class weights.
+
+- `models/predict.py`
+  - Loads the saved model artifacts.
+  - Generates live features for today’s fixtures.
+  - Produces a prediction DataFrame containing:
+    - `over_2_5_probability`
+    - `btts_probability`
+    - `prob_home_win`
+    - `prob_draw`
+    - `prob_away_win`
+  - Merges match metadata such as kickoff time and odds from DuckDB.
+
+### Scripts and utilities
+- `scripts/backtest.py`
+  - Simple historical analytics on finished matches in DuckDB.
+  - Calculates actual over-2.5 frequency for past games.
+
+- `scripts/eval_model.py`
+  - Diagnostic evaluation script using `data/matches` and model predictions.
+  - Computes accuracy, Brier score, precision, and recall for the loaded model.
+
+- `scripts/inspect_fixtures.py`
+  - Helps inspect fixture files under `data/fixtures`.
+  - Prints sample rows, columns, and competitions.
+
+- `scripts/run_fast_train.py`
+  - Convenience wrapper intended to call a fast training routine.
+  - Current repo code may require small wiring fixes before this wrapper works cleanly.
+
+- `scripts/run_local_prediction.py`
+  - Convenience wrapper intended for local prediction workflows.
+  - The current version expects helper functions in `models.predict` that may not yet be defined.
+
+## Data and integration flow
+
+1. `data/collector.py` pulls live schedule and odds into `duckdb`.
+2. `features/engineer.py` computes team and match-level features from historical results.
+3. `models/train.py` trains three model artifacts and saves them to `models/`.
+4. `models/predict.py` loads those artifacts and scores today’s fixture rows.
+5. `app.py` renders the Streamlit dashboard using the scored output.
+
+This means your prediction stack currently integrates:
+- API-Football v3 for scheduled fixtures,
+- The Odds API v4 for market pricing,
+- DuckDB for lightweight analytical storage,
+- scikit-learn for machine learning,
+- Streamlit for live delivery.
+
+## Setup and run locally
 
 1. Create and activate a virtual environment:
 
 ```powershell
 python -m venv .venv
-.venv\Scripts\Activate.ps1    # PowerShell
+.venv\Scripts\Activate.ps1
 ```
 
-2. Install requirements:
+2. Install dependencies:
 
-```bash
+```powershell
 python -m pip install -r requirements.txt
 ```
 
-3. Build the match database (this expects the CSV files in `data/` or reachable by the collector):
+3. Initialize the DuckDB schema:
 
-```bash
+```powershell
 python data/collector.py --build-db
 ```
 
-4. Train a model (fast for quick iteration, full for final model):
+4. Fetch today’s fixtures and odds:
 
-```bash
-# Fast (shorter training)
-python -m models.train --train --fast
-
-# Full training
-python -m models.train --train
+```powershell
+python data/collector.py --fetch-today
 ```
 
-After training the pipeline saves `models/over25_model.joblib` (and optionally a scaler) at the path defined in `config.py`.
+5. Train the models:
 
-5. Run the Streamlit UI locally:
+```powershell
+python models/train.py
+```
 
-```bash
+6. Run the Streamlit app:
+
+```powershell
 streamlit run app.py
 ```
 
-Open `http://localhost:8501` in your browser and upload a fixtures CSV (columns: `date`, `competition`, `home_team`, `away_team`) to view predictions.
+7. Open the browser at `http://localhost:8501`.
 
-### Fixtures folder
+## Important paths and files
 
-You can keep multiple fixture CSVs in a single folder for convenience. Create `data/fixtures/` and paste all your fixtures CSV files there. The CLI and utilities accept a directory path and will concatenate all `*.csv` files in that folder when producing predictions.
+- `config.py` — dataset and artifact path configuration.
+- `data/matches.duckdb` — main DuckDB file used by feature engineering and predictions.
+- `models/over25_model.joblib` — Over 2.5 goals model.
+- `models/btts_model.joblib` — BTTS model.
+- `models/outcome_model.joblib` — 3-way outcome model.
 
-Example:
+## How to use the Streamlit app
 
-```powershell
-mkdir data\fixtures
-# copy or move your CSV files into data\fixtures\
-```
+The app uses `models.predict.score_todays_fixtures()` to:
+- load all three saved models,
+- create live prediction rows from today’s data,
+- compute probabilities,
+- merge in match time and betting odds,
+- display a sortable, exportable table.
 
-Then run the CLI using the folder as the fixtures argument:
+### Required data shape
 
-```bash
-python -m models.predict --date 2025-05-01 --fixtures data/fixtures
-```
+Fixtures should use consistent team naming between today’s feed and the historical DuckDB records. If names do not match, predictions may not align correctly.
 
-## Model artifacts and Git
+## Notes on current repo consistency
 
-- Trained models are stored under `models/` and are referenced by `config.MODEL_PATH`.
-- By default the repository may ignore `*.joblib`. If you want to commit a small model artifact to the Git repo, add an allow rule in `.gitignore` or use Git LFS for large artifacts.
-
-Example: enable Git LFS for joblib files (recommended if artifact >100MB):
-
-```bash
-git lfs install
-git lfs track "models/*.joblib"
-git add .gitattributes
-git add models/over25_model.joblib
-git commit -m "Add model via LFS"
-git push origin <branch>
-```
-
-If you prefer not to commit trained models, host them externally (S3, GitHub Releases, Hugging Face) and add a download fallback in `models/predict.py` (see Troubleshooting below).
-
-## Deployment to Streamlit Cloud (share.streamlit.io)
-
-- Streamlit apps running on Streamlit Cloud pull from your GitHub repository. If the app requires the model artifact to be present in the repo, either:
-	- Commit the artifact (use Git LFS for large files), or
-	- Add code to download the model at runtime from a stable URL, or
-	- Use a CI workflow to build the model and attach it as a release or artifact the app can fetch.
-
-- Note: Streamlit Cloud may redirect to an auth page when an app requires owner-only access or when the app is private. Public apps should be reachable without login.
-
-## Predicting from the CLI
-
-Example CLI usage:
-
-```bash
-python -m models.predict --date 2025-05-01 --fixtures path/to/fixtures.csv --output predictions.csv
-```
-
-`models.predict` will:
-- Load the trained pipeline from `config.MODEL_PATH` (joblib)
-- Load the `matches.duckdb` DB from `config.DB_PATH` for historical features
-- Build fixture-level features and score each match
-
-The output CSV contains `home_team`, `away_team`, `over_2_5_probability`, and `prediction` (0/1) among other columns.
-
-## Backtesting / Evaluation
-
-- Use `scripts/backtest.py` to simulate historical predictions and compute performance metrics over time. The backtest script uses the same feature engineering pipeline to ensure reproducibility.
+- The core prediction flow is implemented via `app.py`, `models/predict.py`, and `features/engineer.py`.
+- Some script wrappers in `scripts/` refer to helper functions or training entrypoints that may require repository alignment.
+- If a utility fails, use the main modules directly:
+  - `python data/collector.py --build-db`
+  - `python data/collector.py --fetch-today`
+  - `python models/train.py`
+  - `streamlit run app.py`
 
 ## Troubleshooting
 
-- "Model not found / app asks to run train.py": Ensure `models/over25_model.joblib` exists at `config.MODEL_PATH` and is readable by the runtime. Locally, train then commit or copy the file. On Streamlit Cloud, either commit the model (LFS if large) or implement a download fallback.
+- `app.py` returns no data:
+  - Confirm `models/*.joblib` exists.
+  - Confirm `data/matches.duckdb` exists and contains `historical_matches`.
 
-- `.gitignore` blocks joblib: If you see `*.joblib` in `.gitignore`, add an exception for `models/`:
+- API keys:
+  - `API_FOOTBALL_KEY` for fixtures.
+  - `THE_ODDS_API_KEY` for odds.
 
-```text
-*.joblib
-!models/*.joblib
-```
+- Model artifact handling:
+  - If you choose not to commit large `.joblib` files, store them externally or use a download fallback in the prediction code.
 
-- File too large for GitHub: If the artifact is >100MB, GitHub will reject the push. Use Git LFS or host the file externally.
+- Data consistency:
+  - Team names must match between live fixture input and archived historical records.
 
-- Streamlit redirecting to auth: Streamlit Cloud will redirect to an auth page for private apps or if you are not signed in. Make the app public or ensure proper share settings.
+## Recommended next improvements
 
-- Team names mismatch causing prediction errors: Uploaded fixtures must use identical naming to the historical database (exact string matches). Use the `tmp_feature_diag.py` helpers to inspect feature mapping and team normalization.
-
-## Development notes
-
-- Feature engineering is in `features/engineer.py`. Changes here must be coordinated with training and backtesting.
-- The training pipeline uses an XGBoost classifier inside a `sklearn.pipeline.Pipeline` with `StandardScaler`.
-- For fast iteration use `--fast` with `models.train` to reduce `n_estimators` and increase learning rate.
-
-## CI / Automation suggestions
-
-- Add a GitHub Actions workflow that:
-	1. Builds the DB and trains the model on push to a trusted branch or on a schedule.
-	2. Uploads the model as a release asset or commits it to a model-artifacts branch (use LFS).
-	3. Optionally triggers a redeploy of the Streamlit app or updates a storage URL that the app can download from.
-
-## Contributing & contact
-
-Please open issues or PRs. If you want to share improvements to features, model architecture, or deploy automation, submit a PR and include tests or a short reproducible example.
+- Add a `models.predict.load_model()` / `predict_for_date()` wrapper so `scripts/run_local_prediction.py` works consistently.
+- Add a GitHub Actions workflow to build the DB, train models, and optionally publish artifacts.
+- Add a `scripts/retrain.sh` or `Makefile` for reproducible local automation.
+- Add a small notebook or script to validate fixture name normalization.
 
 ## License
 
-This repository is provided under an open-source-friendly license (check the LICENSE file if present). Use at your own risk; evaluate predictions before using for real betting or financial decisions.
+This repository contains predictive analytics code for football match markets. Evaluate with domain expertise and do not treat outputs as guaranteed betting advice.
 
