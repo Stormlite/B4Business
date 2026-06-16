@@ -11,11 +11,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # Explicitly verified base endpoints matching official documentation parameters
 API_URL = "https://api-sports.io"
-# 🌟 FIXED: Changed to the correct collective upcoming odds path
 ODDS_API_BASE_URL = "https://the-odds-api.com"
-
-# League filtering indices (Premier League, La Liga, Serie A, Bundesliga, Ligue 1)
-TARGET_LEAGUE_IDS = [39, 140, 135, 78, 61]
 
 def fetch_live_market_odds():
     """Queries The Odds API V4 upcoming endpoint to harvest live 1X2 market rows."""
@@ -24,10 +20,9 @@ def fetch_live_market_odds():
         print("⚠️ Warning: THE_ODDS_API_KEY not set. Using default baseline odds matrix.")
         return {}
 
-    # Target soccer explicitly using the sport parameter filter key
     params = {
         "apiKey": api_key,
-        "sport": "soccer", # 🌟 FIXED: Isolates soccer leagues dynamically out of the upcoming stream
+        "sport": "soccer", 
         "regions": "eu,uk",  
         "markets": "h2h",
         "oddsFormat": "decimal",
@@ -51,7 +46,6 @@ def fetch_live_market_odds():
             bookmakers = item.get("bookmakers", [])
             
             if bookmakers:
-                # Extract pricing details from the primary active provider
                 markets = bookmakers[0].get("markets", [])
                 if markets:
                     outcomes = markets[0].get("outcomes", [])
@@ -67,7 +61,7 @@ def fetch_live_market_odds():
     return odds_map
 
 def fetch_todays_fixtures_from_api():
-    """Fetches real-world fixtures along with live integrated V4 odds mappings."""
+    """Fetches ALL real-world fixtures globally along with live integrated V4 odds mappings."""
     api_key = os.getenv("API_FOOTBALL_KEY")
     if not api_key:
         print("⚠️ Warning: API_FOOTBALL_KEY environment variable not set.")
@@ -76,65 +70,66 @@ def fetch_todays_fixtures_from_api():
     headers = {"x-apisports-key": api_key}
     today = datetime.date.today().strftime("%Y-%m-%d")
     
+    # Pre-fetch real-world market odds dictionary arrays
     live_odds_feed = fetch_live_market_odds()
     
-    parsed_matches = []
-    for league_id in TARGET_LEAGUE_IDS:
-        params = {"date": today, "league": league_id}
-        try:
-            # allow_redirects=False stops proxy servers from dropping authorization header blocks
-            response = requests.get(API_URL, headers=headers, params=params, timeout=15, allow_redirects=False)
-            response.raise_for_status()
-            data = response.json()
-        except Exception as e:
-            print(f"❌ Error connecting for league {league_id}: {e}")
-            continue
-
-        fixtures_list = data.get("response", [])
-        for item in fixtures_list:
-            fixture = item.get("fixture", {})
-            league = item.get("league", {})
-            teams = item.get("teams", {})
-            goals = item.get("goals", {})
-            
-            home_name = teams.get("home", {}).get("name")
-            away_name = teams.get("away", {}).get("name")
-            kickoff_time = fixture.get("date")[11:16] if fixture.get("date") else "15:00"
-            
-            odds_h, odds_d, odds_a = 2.10, 3.20, 3.40
-            lookup_key = f"{str(home_name).lower()} vs {str(away_name).lower()}"
-            
-            matched_odds = live_odds_feed.get(lookup_key)
-            if not matched_odds:
-                # Run an automated partial text query check for slight spelling variations
-                for key, odds in live_odds_feed.items():
-                    if str(home_name).lower() in key or str(away_name).lower() in key:
-                        matched_odds = odds
-                        break
-            
-            if matched_odds:
-                odds_h = matched_odds["H"]
-                odds_d = matched_odds["D"]
-                odds_a = matched_odds["A"]
-
-            parsed_matches.append({
-                "match_id": fixture.get("id"),
-                "match_date": fixture.get("date")[:10] if fixture.get("date") else today,
-                "match_time": kickoff_time,
-                "competition": league.get("name", "Unknown League"),
-                "home_team": home_name,
-                "away_team": away_name,
-                "home_score": goals.get("home"), 
-                "away_score": goals.get("away"), 
-                "status": fixture.get("status", {}).get("short", "NS"),
-                "odds_home": odds_h,
-                "odds_draw": odds_d,
-                "odds_away": odds_a
-            })
-
-    if not parsed_matches:
-        print("ℹ️ No active scheduled matches found for the 5 monitored major leagues today.")
+    # 🌟 OPTIMIZATION FIXED: Querying only by date pulls ALL global leagues in 1 single request
+    params = {"date": today}
+    print(f"🔄 Requesting ALL global fixtures from API-Football for date: {today}...")
+    try:
+        response = requests.get(API_URL, headers=headers, params=params, timeout=15, allow_redirects=False)
+        response.raise_for_status()
+        data = response.json()
+    except Exception as e:
+        print(f"❌ Error connecting to API-Football global endpoint: {e}")
         return pd.DataFrame()
+
+    fixtures_list = data.get("response", [])
+    if not fixtures_list:
+        print(f"ℹ️ No active scheduled matches found globally for date: {today}")
+        return pd.DataFrame()
+
+    parsed_matches = []
+    for item in fixtures_list:
+        fixture = item.get("fixture", {})
+        league = item.get("league", {})
+        teams = item.get("teams", {})
+        goals = item.get("goals", {})
+        
+        home_name = teams.get("home", {}).get("name")
+        away_name = teams.get("away", {}).get("name")
+        kickoff_time = fixture.get("date")[11:16] if fixture.get("date") else "15:00"
+        
+        # Default baseline odd fallbacks
+        odds_h, odds_d, odds_a = 2.10, 3.20, 3.40
+        lookup_key = f"{str(home_name).lower()} vs {str(away_name).lower()}"
+        
+        matched_odds = live_odds_feed.get(lookup_key)
+        if not matched_odds:
+            for key, odds in live_odds_feed.items():
+                if str(home_name).lower() in key or str(away_name).lower() in key:
+                    matched_odds = odds
+                    break
+        
+        if matched_odds:
+            odds_h = matched_odds["H"]
+            odds_d = matched_odds["D"]
+            odds_a = matched_odds["A"]
+
+        parsed_matches.append({
+            "match_id": fixture.get("id"),
+            "match_date": fixture.get("date")[:10] if fixture.get("date") else today,
+            "match_time": kickoff_time,
+            "competition": league.get("name", "Unknown League"),
+            "home_team": home_name,
+            "away_team": away_name,
+            "home_score": goals.get("home"), 
+            "away_score": goals.get("away"), 
+            "status": fixture.get("status", {}).get("short", "NS"),
+            "odds_home": odds_h,
+            "odds_draw": odds_d,
+            "odds_away": odds_a
+        })
 
     df_parsed = pd.DataFrame(parsed_matches)
     df_parsed["status"] = df_parsed["status"].apply(lambda x: "FINISHED" if x in ["FT", "AET", "PEN"] else "SCHEDULED")
