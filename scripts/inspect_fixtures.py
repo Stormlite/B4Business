@@ -1,14 +1,22 @@
-import sys
-from pathlib import Path
+"""scripts/inspect_fixtures.py — inspect what's in the DuckDB and CSV data files"""
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Ensure project root on sys.path
-root = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(root))
+import duckdb, pandas as pd
+from config import DB_PATH
+from features.engineer import load_csv_data
 
-from models.predict import load_fixtures
+print("── DuckDB historical_matches ────────────────────────────")
+conn = duckdb.connect(DB_PATH)
+df_db = conn.execute("SELECT * FROM historical_matches LIMIT 5").df()
+total = conn.execute("SELECT COUNT(*) FROM historical_matches").fetchone()[0]
+conn.close()
+print(f"Total rows: {total}")
+print(df_db.to_string(index=False))
 
-p = Path('data/fixtures')
-df = load_fixtures(p)
-print('Columns:', df.columns.tolist())
-print('\nSample rows:\n', df.head().to_string(index=False))
-print('\nUnique competitions:', df['competition'].unique()[:20])
+print("\n── CSV season files ─────────────────────────────────────")
+df_csv = load_csv_data()
+print(f"Total rows: {len(df_csv)}")
+print("Columns:", df_csv.columns.tolist()[:15], "...")
+print("Competitions:", df_csv["competition"].unique()[:10])
+print(df_csv[["match_date","competition","home_team","away_team","home_score","away_score"]].head().to_string(index=False))

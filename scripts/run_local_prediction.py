@@ -1,33 +1,22 @@
-from pathlib import Path
-import pandas as pd
+"""scripts/run_local_prediction.py — run predictions locally and print results"""
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import sys
-root = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(root))
-
-from models.predict import load_model, load_match_history, load_fixtures, predict_for_date
-
+import datetime
+from models.predict import score_todays_fixtures
 
 def main():
-    print('Loading model...')
-    model = load_model()
-    print('Loading history...')
-    history = load_match_history()
-    fixtures_dir = Path('data/fixtures')
-    print(f'Loading fixtures from {fixtures_dir}...')
-    fixtures = load_fixtures(fixtures_dir)
-    fixtures['date'] = pd.to_datetime(fixtures['date'])
-    dates = sorted(fixtures['date'].unique())
-    if not dates:
-        raise SystemExit('No fixture dates found')
-    date = dates[0]
-    print(f'Running predictions for {date.date()} on {len(fixtures)} fixtures...')
-    preds = predict_for_date(model, history, fixtures, date)
-    print(preds.head().to_string(index=False))
-    out = Path('predictions_sample.csv')
-    preds.to_csv(out, index=False)
-    print(f'Wrote sample predictions to {out}')
+    print(f"⚽ Running predictions for {datetime.date.today()}...")
+    df = score_todays_fixtures()
+    if df is None or df.empty:
+        print("ℹ️  No fixtures found for today.")
+        return
+    print(f"✅ {len(df)} fixtures scored.\n")
+    print(df[["home_team","away_team","over_2_5_probability","btts_probability",
+              "high_conf_pick"]].to_string(index=False))
+    out = "predictions_sample.csv"
+    df.to_csv(out, index=False)
+    print(f"\n📥 Saved to {out}")
 
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

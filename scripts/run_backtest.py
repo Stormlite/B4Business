@@ -1,11 +1,8 @@
-import joblib
-from pathlib import Path
+"""scripts/run_backtest.py — run the historical backtest report"""
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from config import MODEL_PATH, DB_PATH
-from scripts.backtest import load_matches, evaluate_model, backtest_by_date
+from scripts.backtest import evaluate_historical_accuracy
 
-if __name__ == '__main__':
-    model = joblib.load(MODEL_PATH)
-    matches = load_matches()
-    evaluate_model(model, matches)
-    backtest_by_date(model, matches)
+if __name__ == "__main__":
+    evaluate_historical_accuracy()
