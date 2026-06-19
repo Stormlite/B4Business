@@ -1,43 +1,56 @@
 """
 models/predict.py — Live prediction scorer
 ==========================================
-Upgrades vs original:
-  - Loads saved feature-column list from training so predict always
-    uses the exact same features the model was trained on
-  - Adds a `confidence` column and `high_conf` flag for selective betting
-  - Falls back gracefully when feature list artefact is missing
+Key fix: when live DuckDB data is missing columns that the model was trained on
+(shots, odds, corners from CSV), we fill them with the training-time medians
+saved during model training. NaN values within present columns are also filled
+with training medians so the LR component of the ensemble never sees NaN input.
 """
 
 import os
 import joblib
 import pandas as pd
+import numpy as np
 import duckdb
 
 from features.engineer import (
     generate_feature_pipeline,
     get_available_feature_cols,
-    FEATURE_COLS,
-    ODDS_FEATURE_COLS,
 )
 from config import MODEL_PATH, BTTS_MODEL_PATH, OUTCOME_MODEL_PATH, DB_PATH
 
-MODEL_DIR = os.path.dirname(MODEL_PATH)
+MODEL_DIR         = os.path.dirname(MODEL_PATH)
 FEAT_COLS_OVER25  = os.path.join(MODEL_DIR, "over25_feature_cols.joblib")
 FEAT_COLS_BTTS    = os.path.join(MODEL_DIR, "btts_feature_cols.joblib")
 FEAT_COLS_OUTCOME = os.path.join(MODEL_DIR, "outcome_feature_cols.joblib")
+FEAT_MEDIANS_PATH = os.path.join(MODEL_DIR, "feature_medians.joblib")
 
-# Minimum model probability to be flagged as a "high-confidence" pick
 HIGH_CONF_THRESHOLD = 0.62
 
 
-def _load_feat_cols(path: str, df: pd.DataFrame) -> list:
-    """Load saved feature columns; fall back to inferring from df if missing."""
-    if os.path.exists(path):
-        cols = joblib.load(path)
-        # Keep only columns that exist in live data (odds cols may not be present)
-        return [c for c in cols if c in df.columns]
-    # Fallback: infer from current data
-    return get_available_feature_cols(df)
+def _load_medians() -> dict:
+    """Load training medians; return empty dict if not yet saved."""
+    if os.path.exists(FEAT_MEDIANS_PATH):
+        return joblib.load(FEAT_MEDIANS_PATH)
+    return {}
+
+
+def _build_feature_matrix(df: pd.DataFrame, feat_cols: list, medians: dict) -> pd.DataFrame:
+    """
+    Build a feature matrix that always has every column the model expects.
+    - Columns missing from live data → filled with training-time median
+    - NaN values within present columns → also filled with training-time median
+    This prevents both the sklearn feature-name mismatch AND the NaN error from
+    the Logistic Regression component of the ensemble.
+    """
+    X = pd.DataFrame(index=df.index)
+    for col in feat_cols:
+        fallback = float(medians.get(col, 0.0))
+        if col in df.columns:
+            X[col] = df[col].fillna(fallback).values
+        else:
+            X[col] = fallback
+    return X
 
 
 def score_todays_fixtures() -> pd.DataFrame:
@@ -47,41 +60,42 @@ def score_todays_fixtures() -> pd.DataFrame:
     """
     required = [MODEL_PATH, BTTS_MODEL_PATH, OUTCOME_MODEL_PATH]
     if not all(os.path.exists(p) for p in required):
-        print("⚠️  Model artefacts missing — run `python models/train.py` first.")
+        print("⚠️  Model artefacts missing — run `python -m models.train` first.")
         return pd.DataFrame()
 
     model_over25  = joblib.load(MODEL_PATH)
     model_btts    = joblib.load(BTTS_MODEL_PATH)
     model_outcome = joblib.load(OUTCOME_MODEL_PATH)
 
+    feat_over25  = joblib.load(FEAT_COLS_OVER25)  if os.path.exists(FEAT_COLS_OVER25)  else None
+    feat_btts    = joblib.load(FEAT_COLS_BTTS)    if os.path.exists(FEAT_COLS_BTTS)    else None
+    feat_outcome = joblib.load(FEAT_COLS_OUTCOME) if os.path.exists(FEAT_COLS_OUTCOME) else None
+
+    medians = _load_medians()
+
     df_today = generate_feature_pipeline(extract_live_today_only=True)
     if df_today.empty:
         return pd.DataFrame()
 
-    feat_over25  = _load_feat_cols(FEAT_COLS_OVER25,  df_today)
-    feat_btts    = _load_feat_cols(FEAT_COLS_BTTS,    df_today)
-    feat_outcome = _load_feat_cols(FEAT_COLS_OUTCOME, df_today)
+    live_cols    = get_available_feature_cols(df_today)
+    feat_over25  = feat_over25  or live_cols
+    feat_btts    = feat_btts    or live_cols
+    feat_outcome = feat_outcome or live_cols
 
-    # Subset to common available columns (robustness if live data lacks odds cols)
-    def _predict(model, feat_cols):
-        X = df_today[feat_cols].fillna(df_today[feat_cols].median())
-        return model.predict_proba(X)
+    X_over25  = _build_feature_matrix(df_today, feat_over25,  medians)
+    X_btts    = _build_feature_matrix(df_today, feat_btts,    medians)
+    X_outcome = _build_feature_matrix(df_today, feat_outcome, medians)
 
-    prob_over25_mat = _predict(model_over25, feat_over25)
-    prob_btts_mat   = _predict(model_btts,   feat_btts)
-    prob_outcome    = _predict(model_outcome, feat_outcome)
+    prob_over25  = model_over25.predict_proba(X_over25)[:, 1]
+    prob_btts    = model_btts.predict_proba(X_btts)[:, 1]
+    prob_outcome = model_outcome.predict_proba(X_outcome)
 
-    prob_over25 = prob_over25_mat[:, 1]
-    prob_btts   = prob_btts_mat[:, 1]
-
-    # Confidence = how far from 0.5 the model is
-    confidence  = (prob_over25 - 0.5).abs() if hasattr(prob_over25, "abs") else abs(prob_over25 - 0.5)
-    confidence  = abs(prob_over25 - 0.5)
+    confidence = np.abs(prob_over25 - 0.5)
 
     df_output = pd.DataFrame({
-        "match_id":           df_today["match_id"],
-        "home_team":          df_today["home_team"],
-        "away_team":          df_today["away_team"],
+        "match_id":             df_today["match_id"],
+        "home_team":            df_today["home_team"],
+        "away_team":            df_today["away_team"],
         "over_2_5_probability": prob_over25.round(4),
         "btts_probability":     prob_btts.round(4),
         "prob_home_win":        prob_outcome[:, 0].round(4),
@@ -91,7 +105,6 @@ def score_todays_fixtures() -> pd.DataFrame:
         "high_conf_pick":       (prob_over25 >= HIGH_CONF_THRESHOLD) | (prob_over25 <= (1 - HIGH_CONF_THRESHOLD)),
     })
 
-    # Merge kickoff times and bookmaker odds from DuckDB
     try:
         conn    = duckdb.connect(DB_PATH)
         df_meta = conn.execute(

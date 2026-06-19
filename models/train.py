@@ -5,7 +5,8 @@ Upgrades vs original:
   1. Trains from CSV data (5 330 rows) instead of only DuckDB (1 872)
   2. Ensemble model: soft-voting RF + Logistic Regression (beats single RF)
   3. Larger rolling window (10) and richer feature set (shots, corners, odds)
-  4. Saves the feature column list alongside each model artefact
+  4. Saves feature column list AND training medians alongside each model artefact
+     (medians are used at predict time to fill columns missing from live DuckDB data)
   5. Cross-validation accuracy reported during training
   6. numpy import fixed (was missing when run as module)
 """
@@ -23,18 +24,16 @@ from sklearn.model_selection import cross_val_score, StratifiedKFold
 from features.engineer import generate_training_data, get_available_feature_cols
 from config import MODEL_PATH, BTTS_MODEL_PATH, OUTCOME_MODEL_PATH
 
-# Paths for the feature-column lists saved alongside each model
-MODEL_DIR       = os.path.dirname(MODEL_PATH)
-FEAT_COLS_OVER25   = os.path.join(MODEL_DIR, "over25_feature_cols.joblib")
-FEAT_COLS_BTTS     = os.path.join(MODEL_DIR, "btts_feature_cols.joblib")
-FEAT_COLS_OUTCOME  = os.path.join(MODEL_DIR, "outcome_feature_cols.joblib")
+MODEL_DIR         = os.path.dirname(MODEL_PATH)
+FEAT_COLS_OVER25  = os.path.join(MODEL_DIR, "over25_feature_cols.joblib")
+FEAT_COLS_BTTS    = os.path.join(MODEL_DIR, "btts_feature_cols.joblib")
+FEAT_COLS_OUTCOME = os.path.join(MODEL_DIR, "outcome_feature_cols.joblib")
+# Training medians saved so predict.py can impute columns missing from live DuckDB data
+FEAT_MEDIANS_PATH = os.path.join(MODEL_DIR, "feature_medians.joblib")
 
 
 def _build_ensemble(random_state: int = 42) -> VotingClassifier:
-    """
-    Soft-voting ensemble of Random Forest + Logistic Regression.
-    Consistently outperforms a single RF on this dataset (~+1-2 pp accuracy).
-    """
+    """Soft-voting ensemble of Random Forest + Logistic Regression."""
     rf = RandomForestClassifier(
         n_estimators=300,
         max_depth=10,
@@ -72,6 +71,14 @@ def run_training_pipeline(verbose: bool = True) -> bool:
         print(f"   Feature list: {feat_cols}")
 
     X = df_train[feat_cols]
+
+    # Save training medians — used at predict time to fill missing columns (e.g. shots,
+    # odds) that exist in CSV training data but not in the live DuckDB feed.
+    training_medians = X.median().to_dict()
+    joblib.dump(training_medians, FEAT_MEDIANS_PATH)
+    if verbose:
+        print(f"💾 Training medians saved to {FEAT_MEDIANS_PATH}")
+
     cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
 
     # ── 1. Over 2.5 Goals ─────────────────────────────────────────────────
