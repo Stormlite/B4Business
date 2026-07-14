@@ -82,6 +82,7 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
 .pill-blue   { background:#DBEAFE; color:#1E40AF; border:1px solid #93C5FD; }
 .pill-purple { background:#EDE9FE; color:#5B21B6; border:1px solid #C4B5FD; }
 .pill-gray   { background:#F1F5F9; color:#475569; border:1px solid #CBD5E1; }
+.pill-teal   { background:#CCFBF1; color:#0F766E; border:1px solid #5EEAD4; }
 
 /* Section titles */
 .section-title {
@@ -107,7 +108,7 @@ st.markdown(f"""
 <div class="b4b-header">
   <div class="b4b-badge">Live · {today}</div>
   <h1>⚽ B4Business Football Analytics</h1>
-  <p>Machine-learning predictions for today's fixtures · Over 2.5 · BTTS · 1X2</p>
+  <p>Machine-learning predictions for today's fixtures · Over 2.5 · Over 0.5 · BTTS · 1X2</p>
 </div>
 """, unsafe_allow_html=True)
 
@@ -185,6 +186,7 @@ if not df_hc.empty:
     st.markdown('<div class="section-title">⭐ High-Confidence Selections</div>', unsafe_allow_html=True)
     for _, row in df_hc.iterrows():
         o25   = row["over_2_5_probability"] * 100
+        o05   = row.get("over_0_5_probability", float("nan")) * 100
         btts  = row.get("btts_probability", 0) * 100
         hw    = row.get("prob_home_win", 0) * 100
         dw    = row.get("prob_draw", 0) * 100
@@ -203,6 +205,7 @@ if not df_hc.empty:
           <div class="meta">⏰ {time_} &nbsp;·&nbsp; Odds: {odds_str}</div>
           <div class="pills">
             <span class="pill pill-green">Over 2.5 &nbsp; {o25:.1f}%</span>
+            {f'<span class="pill pill-teal">Over 0.5 &nbsp; {o05:.1f}%</span>' if o05 == o05 else ''}
             <span class="pill pill-blue">BTTS &nbsp; {btts:.1f}%</span>
             <span class="pill pill-purple">1X2 &nbsp; {hw:.0f}% / {dw:.0f}% / {aw:.0f}%</span>
           </div>
@@ -220,6 +223,10 @@ table["Time"]      = df_filtered.get("match_time", "—")
 table["Home"]      = df_filtered["home_team"]
 table["Away"]      = df_filtered["away_team"]
 table["Over 2.5"]  = (df_filtered["over_2_5_probability"] * 100).map("{:.1f}%".format)
+if "over_0_5_probability" in df_filtered.columns:
+    table["Over 0.5"] = (df_filtered["over_0_5_probability"] * 100).map(
+        lambda v: "—" if pd.isna(v) else f"{v:.1f}%"
+    )
 table["BTTS"]      = (df_filtered.get("btts_probability", 0) * 100).map("{:.1f}%".format)
 table["1X2 (H/D/A)"] = df_filtered.apply(
     lambda r: f"{r.get('prob_home_win',0)*100:.0f}% / {r.get('prob_draw',0)*100:.0f}% / {r.get('prob_away_win',0)*100:.0f}%",

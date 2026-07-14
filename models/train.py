@@ -22,10 +22,11 @@ from sklearn.pipeline import Pipeline
 from sklearn.model_selection import cross_val_score, StratifiedKFold
 
 from features.engineer import generate_training_data, get_available_feature_cols
-from config import MODEL_PATH, BTTS_MODEL_PATH, OUTCOME_MODEL_PATH
+from config import MODEL_PATH, OVER05_MODEL_PATH, BTTS_MODEL_PATH, OUTCOME_MODEL_PATH
 
 MODEL_DIR         = os.path.dirname(MODEL_PATH)
 FEAT_COLS_OVER25  = os.path.join(MODEL_DIR, "over25_feature_cols.joblib")
+FEAT_COLS_OVER05  = os.path.join(MODEL_DIR, "over05_feature_cols.joblib")
 FEAT_COLS_BTTS    = os.path.join(MODEL_DIR, "btts_feature_cols.joblib")
 FEAT_COLS_OUTCOME = os.path.join(MODEL_DIR, "outcome_feature_cols.joblib")
 # Training medians saved so predict.py can impute columns missing from live DuckDB data
@@ -91,6 +92,22 @@ def run_training_pipeline(verbose: bool = True) -> bool:
     model_over25.fit(X, y_over25)
     joblib.dump(model_over25, MODEL_PATH)
     joblib.dump(feat_cols, FEAT_COLS_OVER25)
+
+    # ── 1b. Over 0.5 Goals (at least one goal in the match) ───────────────
+    if verbose: print("\n🧠 Training Over 0.5 Goals model...")
+    y_over05 = df_train["target_over05"]
+    if y_over05.nunique() < 2:
+        # Over 0.5 is heavily one-sided in most leagues (few 0-0s), so guard
+        # against a degenerate single-class training set instead of crashing.
+        print("⚠️  Over 0.5 target has only one class in this data — skipping.")
+    else:
+        model_over05 = _build_ensemble()
+        cv_scores = cross_val_score(model_over05, X, y_over05, cv=cv, scoring="accuracy")
+        if verbose:
+            print(f"   CV accuracy: {cv_scores.mean():.4f} ± {cv_scores.std():.4f}")
+        model_over05.fit(X, y_over05)
+        joblib.dump(model_over05, OVER05_MODEL_PATH)
+        joblib.dump(feat_cols, FEAT_COLS_OVER05)
 
     # ── 2. Both Teams to Score ────────────────────────────────────────────
     if verbose: print("🧠 Training BTTS model...")

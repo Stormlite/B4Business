@@ -107,6 +107,7 @@ def load_csv_data() -> pd.DataFrame:
         "match_id":       -(np.arange(len(raw)) + 1),
         "total_goals":    total,
         "target_over25":  (total > 2.5).astype(int),
+        "target_over05":  (total > 0.5).astype(int),
         "target_btts":    ((home_score > 0) & (away_score > 0)).astype(int),
         "target_home_win": (home_score > away_score).astype(int),
         "target_draw":     (home_score == away_score).astype(int),
@@ -135,6 +136,7 @@ def load_raw_data_from_db() -> pd.DataFrame:
     df["match_date"] = pd.to_datetime(df["match_date"], errors="coerce")
     df["total_goals"]    = df["home_score"] + df["away_score"]
     df["target_over25"]  = np.where(df["total_goals"] > 2.5, 1, 0)
+    df["target_over05"]  = np.where(df["total_goals"] > 0.5, 1, 0)
     df["target_btts"]    = np.where((df["home_score"] > 0) & (df["away_score"] > 0), 1, 0)
     df["target_home_win"] = np.where(df["home_score"] > df["away_score"], 1, 0)
     df["target_draw"]     = np.where(df["home_score"] == df["away_score"], 1, 0)
@@ -298,7 +300,7 @@ def generate_training_data(use_csv: bool = True) -> pd.DataFrame:
 
     feat_cols = get_available_feature_cols(df)
     target_cols = [
-        "target_over25", "target_btts",
+        "target_over25", "target_over05", "target_btts",
         "target_home_win", "target_draw", "target_away_win",
     ]
     keep = ["match_id", "match_date", "competition", "home_team", "away_team"]
