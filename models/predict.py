@@ -28,6 +28,12 @@ FEAT_MEDIANS_PATH = os.path.join(MODEL_DIR, "feature_medians.joblib")
 
 HIGH_CONF_THRESHOLD = 0.62
 
+# high_conf_pick is deliberately based on the Over 2.5 model only — not Over 0.5.
+# Over 0.5 predictions cluster around 90-97% for nearly every match (the market
+# is inherently ~94/6 skewed), so a confidence threshold on it would flag almost
+# every fixture as "high confidence" and the flag would stop meaning anything.
+# Over 2.5 is close to 50/50 league-wide, so crossing 62% there is a real signal.
+
 
 def _load_medians() -> dict:
     """Load training medians; return empty dict if not yet saved."""
@@ -115,6 +121,7 @@ def score_todays_fixtures() -> pd.DataFrame:
         "prob_draw":            prob_outcome[:, 1].round(4),
         "prob_away_win":        prob_outcome[:, 2].round(4),
         "over25_confidence":    confidence.round(4),
+        # Over 2.5 only — see HIGH_CONF_THRESHOLD comment above for why.
         "high_conf_pick":       (prob_over25 >= HIGH_CONF_THRESHOLD) | (prob_over25 <= (1 - HIGH_CONF_THRESHOLD)),
     })
 
