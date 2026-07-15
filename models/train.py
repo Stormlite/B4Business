@@ -33,24 +33,31 @@ FEAT_COLS_OUTCOME = os.path.join(MODEL_DIR, "outcome_feature_cols.joblib")
 FEAT_MEDIANS_PATH = os.path.join(MODEL_DIR, "feature_medians.joblib")
 
 
-def _build_ensemble(random_state: int = 42) -> VotingClassifier:
-    """Soft-voting ensemble of Random Forest + Logistic Regression."""
+def _build_ensemble(random_state: int = 42, balanced: bool = True) -> VotingClassifier:
+    """
+    Soft-voting ensemble of Random Forest + Logistic Regression.
+
+    balanced=True applies class_weight="balanced", which is correct for
+    roughly 50/50 markets (Over 2.5, BTTS, 1X2). For a heavily skewed target
+    like Over 0.5 (~94% positive class), forcing balance distorts predicted
+    probabilities away from the true base rate and produces a *worse*-than-
+    naive Brier score — so that model should be trained with balanced=False.
+    """
+    class_weight = "balanced" if balanced else None
     rf = RandomForestClassifier(
         n_estimators=300,
         max_depth=10,
         min_samples_leaf=5,
-        class_weight="balanced",
+        class_weight=class_weight,
         random_state=random_state,
         n_jobs=-1,
     )
+    lr_kwargs = dict(C=0.5, max_iter=1000, random_state=random_state)
+    if balanced:
+        lr_kwargs["class_weight"] = "balanced"
     lr = Pipeline([
         ("scaler", StandardScaler()),
-        ("lr", LogisticRegression(
-            C=0.5,
-            class_weight="balanced",
-            max_iter=1000,
-            random_state=random_state,
-        )),
+        ("lr", LogisticRegression(**lr_kwargs)),
     ])
     return VotingClassifier(estimators=[("rf", rf), ("lr", lr)], voting="soft")
 
@@ -101,10 +108,19 @@ def run_training_pipeline(verbose: bool = True) -> bool:
         # against a degenerate single-class training set instead of crashing.
         print("⚠️  Over 0.5 target has only one class in this data — skipping.")
     else:
-        model_over05 = _build_ensemble()
-        cv_scores = cross_val_score(model_over05, X, y_over05, cv=cv, scoring="accuracy")
+        # NOTE: balanced=False here, unlike the other three models. Over 0.5 is
+        # ~94/6 skewed; class_weight="balanced" forces the model toward 50/50
+        # and produces a worse-than-naive Brier score (miscalibrated
+        # probabilities) even though accuracy alone can look fine. Brier score
+        # is reported instead of / alongside accuracy for this reason — see
+        # PR discussion for the naive baseline comparison (0.059 Brier).
+        model_over05 = _build_ensemble(balanced=False)
+        cv_acc   = cross_val_score(model_over05, X, y_over05, cv=cv, scoring="accuracy")
+        cv_brier = cross_val_score(model_over05, X, y_over05, cv=cv, scoring="neg_brier_score")
+        naive_brier = float((y_over05 == 0).mean())
         if verbose:
-            print(f"   CV accuracy: {cv_scores.mean():.4f} ± {cv_scores.std():.4f}")
+            print(f"   CV accuracy: {cv_acc.mean():.4f} ± {cv_acc.std():.4f}")
+            print(f"   CV Brier score: {-cv_brier.mean():.4f} (naive always-yes baseline: {naive_brier:.4f})")
         model_over05.fit(X, y_over05)
         joblib.dump(model_over05, OVER05_MODEL_PATH)
         joblib.dump(feat_cols, FEAT_COLS_OVER05)
