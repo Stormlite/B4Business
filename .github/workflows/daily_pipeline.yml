@@ -52,17 +52,20 @@ jobs:
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          
-          # Force tracking all artifacts and model binaries
-          git add data/matches.duckdb models/over25_model.joblib models/btts_model.joblib models/outcome_model.joblib
-          
+
+          # Track all model artefacts and data — glob instead of a hardcoded list so
+          # newly added markets (e.g. over05_model.joblib) don't get left unstaged
+          # and block the rebase below.
+          git add data/matches.duckdb models/*.joblib
+
           if ! git diff --quiet || ! git diff --staged --quiet; then
             git commit -m "Automated Daily Update: Multi-Market Predictive Engines [skip ci]"
-            
-            # Rebase clean to prevent conflict rejections
-            git pull origin master --rebase -X theirs
-            
-            git push origin master
+
+            # Pull/push against the branch that triggered this run, not a hardcoded
+            # 'master' — otherwise a manual workflow_dispatch run on a feature
+            # branch would push its automated commit straight onto master.
+            git pull origin "${GITHUB_REF_NAME}" --rebase -X theirs
+            git push origin HEAD:"${GITHUB_REF_NAME}"
           else
             echo "ℹ️ No adjustments or profile updates detected across database files. Skipping commit node."
           fi
