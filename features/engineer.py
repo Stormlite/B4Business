@@ -126,7 +126,10 @@ def load_raw_data_from_db() -> pd.DataFrame:
             match_id, match_date, competition, home_team, away_team,
             CAST(home_score AS REAL) AS home_score,
             CAST(away_score AS REAL) AS away_score,
-            status
+            status,
+            CAST(odds_home AS REAL) AS odds_home,
+            CAST(odds_draw AS REAL) AS odds_draw,
+            CAST(odds_away AS REAL) AS odds_away
         FROM historical_matches
         ORDER BY match_date ASC
     """
@@ -252,6 +255,16 @@ def _build_rolling_stats(df: pd.DataFrame, window: int = ROLLING_WINDOW) -> pd.D
     for odds_h, odds_d, odds_a, pfx in [
         ("AvgH",  "AvgD",  "AvgA",  "avg"),
         ("B365H", "B365D", "B365A", "b365"),
+        # Live DuckDB schema uses different column names for the same thing
+        # (match-winner decimal odds) — without this, ip_avg_home/ip_avg_draw
+        # were only ever computed for CSV training data, never for live
+        # fixtures, even though real odds were being collected into
+        # odds_home/odds_draw/odds_away all along. Live predictions were
+        # silently falling back to a constant training-median value for the
+        # single most important outcome-model feature (~17% importance),
+        # which biased live 1X2 predictions toward the home team (the
+        # majority class in training) regardless of the actual matchup.
+        ("odds_home", "odds_draw", "odds_away", "avg"),
     ]:
         if all(c in df.columns for c in [odds_h, odds_d, odds_a]):
             margin = (1 / df[odds_h].replace(0, np.nan)

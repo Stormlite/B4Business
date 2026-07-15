@@ -416,7 +416,13 @@ def fetch_live_market_odds():
         for match in data:
             home_team = match.get("home_team")
             away_team = match.get("away_team")
-            odds_home, odds_draw, odds_away = 2.10, 3.20, 3.40
+            # No hardcoded fallback here — 2.10/3.20/3.40 is itself a
+            # home-favoring set of odds, so injecting it for every unmatched
+            # fixture was silently biasing predictions toward the home team.
+            # None propagates through as "no odds available" and the model's
+            # per-column training-median fallback (a neutral, data-derived
+            # value) kicks in instead — see features/engineer.py.
+            odds_home, odds_draw, odds_away = None, None, None
 
             for bookmaker in match.get("bookmakers", []):
                 if bookmaker["key"] in ["sportybet", "onexbet", "bet365", "betway"]:
@@ -502,8 +508,12 @@ def fetch_todays_fixtures_from_api():
         fixture_date = fixture.get("date", "")
         kickoff_time = fixture_date[11:16] if len(fixture_date) >= 16 else "15:00"
 
-        # Odds lookup — exact match first, then fuzzy
-        odds_h, odds_d, odds_a = 2.10, 3.20, 3.40
+        # Odds lookup — exact match first, then fuzzy. No hardcoded default:
+        # an unmatched fixture stores NULL odds rather than a fake
+        # home-favoring price, so the model treats it as genuinely missing
+        # data (falls back to its neutral training median) instead of being
+        # steered toward the home team by a fabricated number.
+        odds_h, odds_d, odds_a = None, None, None
         lookup_key = f"{str(home_name).lower()} vs {str(away_name).lower()}"
         matched_odds = live_odds_feed.get(lookup_key)
 
