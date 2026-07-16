@@ -31,6 +31,12 @@ jobs:
         run: |
           python -m data.collector --fetch-today
 
+      - name: Backfill Match Statistics (shots/corners for recently finished matches)
+        env:
+          API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
+        run: |
+          python -m data.collector --backfill-stats
+
       - name: Retrain Model Automatically
         run: |
           python -m models.train --train

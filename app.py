@@ -196,6 +196,7 @@ if not df_hc.empty:
         oddsD = row.get("odds_draw", 0)
         oddsA = row.get("odds_away", 0)
         odds_str = f"{oddsH:.2f} / {oddsD:.2f} / {oddsA:.2f}" if oddsH else "—"
+        has_odds = row.get("has_market_odds", True)  # default True for older cached predictions
         conf  = row.get("over25_confidence", abs(row["over_2_5_probability"] - 0.5)) * 200
         bar_color = "#10B981" if conf > 60 else "#F59E0B"
 
@@ -208,6 +209,7 @@ if not df_hc.empty:
             {f'<span class="pill pill-teal">Over 0.5 &nbsp; {o05:.1f}%</span>' if o05 == o05 else ''}
             <span class="pill pill-blue">BTTS &nbsp; {btts:.1f}%</span>
             <span class="pill pill-purple">1X2 &nbsp; {hw:.0f}% / {dw:.0f}% / {aw:.0f}%</span>
+            {'' if has_odds else '<span class="pill pill-gray">⚠️ No market odds — 1X2 less reliable</span>'}
           </div>
           <div class="conf-bar-wrap">
             <div class="conf-bar" style="width:{min(conf,100):.0f}%;background:{bar_color};"></div>
@@ -234,7 +236,8 @@ table["1X2 (H/D/A)"] = df_filtered.apply(
 )
 if "odds_home" in df_filtered.columns:
     table["Odds (1/X/2)"] = df_filtered.apply(
-        lambda r: f"{r.get('odds_home',0):.2f} / {r.get('odds_draw',0):.2f} / {r.get('odds_away',0):.2f}",
+        lambda r: f"{r.get('odds_home',0):.2f} / {r.get('odds_draw',0):.2f} / {r.get('odds_away',0):.2f}"
+                  if r.get("has_market_odds", True) else "⚠️ Not available",
         axis=1
     )
 if hc_col:

@@ -123,6 +123,12 @@ def score_todays_fixtures() -> pd.DataFrame:
         "over25_confidence":    confidence.round(4),
         # Over 2.5 only — see HIGH_CONF_THRESHOLD comment above for why.
         "high_conf_pick":       (prob_over25 >= HIGH_CONF_THRESHOLD) | (prob_over25 <= (1 - HIGH_CONF_THRESHOLD)),
+        # True only if real market odds were found for this fixture. When False,
+        # the 1X2/outcome probabilities above were computed with a median-imputed
+        # odds feature — still a real model output, but without the market's
+        # signal, which the outcome model leans on heavily (~30% combined
+        # importance). The app should flag this rather than show it silently.
+        "has_market_odds":      df_today.get("has_market_odds", pd.Series(False, index=df_today.index)).values,
     })
 
     try:

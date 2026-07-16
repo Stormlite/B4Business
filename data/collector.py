@@ -551,6 +551,106 @@ def fetch_todays_fixtures_from_api():
     return df
 
 
+def backfill_match_statistics(days_back: int = 3, limit: int = 50):
+    """
+    Backfills shots / shots-on-target / corners for recently finished matches
+    collected via API-Football, using GET /fixtures/statistics?fixture={id}.
+    Docs: https://www.api-football.com/documentation-v3#tag/Fixtures
+
+    Only targets rows with match_id > 0 (real API-Football fixture IDs — CSV-
+    sourced historical rows use negative placeholder IDs, see load_csv_data)
+    that are FINISHED and still missing statistics, so re-running this is
+    idempotent and cheap on API quota.
+
+    NOTE: written against the documented API-Football v3 response shape
+    (confirmed field names: "Total Shots", "Shots on Goal", "Corner Kicks")
+    but NOT tested against a live call — api-sports.io is not reachable from
+    the sandbox this was developed in. Verify the parsing below against a
+    real response (e.g. one finished fixture) before trusting it at scale.
+    """
+    api_key = os.getenv("API_FOOTBALL_KEY")
+    if not api_key:
+        print("⚠️  Warning: API_FOOTBALL_KEY environment variable not set.")
+        return
+
+    headers = {"x-apisports-key": api_key}
+    conn = duckdb.connect(DB_PATH)
+
+    # DuckDB has no ALTER TABLE ... ADD COLUMN IF NOT EXISTS, so check first.
+    existing_cols = {row[0] for row in conn.execute("DESCRIBE historical_matches").fetchall()}
+    for col in ["home_shots", "away_shots", "home_shots_ot", "away_shots_ot",
+                "home_corners", "away_corners"]:
+        if col not in existing_cols:
+            conn.execute(f"ALTER TABLE historical_matches ADD COLUMN {col} INTEGER")
+
+    targets = conn.execute(f"""
+        SELECT match_id, home_team, away_team FROM historical_matches
+        WHERE status = 'FINISHED'
+          AND match_id > 0
+          AND home_shots IS NULL
+          AND match_date >= CAST((CURRENT_DATE - INTERVAL {days_back} DAY) AS VARCHAR)
+        LIMIT {limit}
+    """).fetchall()
+
+    if not targets:
+        print("ℹ️  No recently finished matches need statistics backfill.")
+        conn.close()
+        return
+
+    print(f"🔄 Backfilling statistics for {len(targets)} finished matches...")
+    url = f"{API_FOOTBALL_BASE_URL}/fixtures/statistics"
+    updated = 0
+
+    for fixture_id, home_team, away_team in targets:
+        try:
+            response = requests.get(url, headers=headers, params={"fixture": fixture_id}, timeout=12)
+            if response.status_code != 200:
+                print(f"⚠️  Statistics fetch failed for fixture {fixture_id}: {response.status_code}")
+                continue
+
+            blocks = response.json().get("response", [])
+            if len(blocks) != 2:
+                # Not yet populated by the API, or an unsupported competition — skip, retry next run.
+                continue
+
+            # Match by team name rather than assume response order is home-first.
+            by_name = {}
+            for block in blocks:
+                stats = {s["type"]: s["value"] for s in block.get("statistics", [])}
+                by_name[str(block.get("team", {}).get("name", "")).lower()] = {
+                    "shots":    stats.get("Total Shots") or 0,
+                    "shots_ot": stats.get("Shots on Goal") or 0,
+                    "corners":  stats.get("Corner Kicks") or 0,
+                }
+
+            home_stats = by_name.get(str(home_team).lower())
+            away_stats = by_name.get(str(away_team).lower())
+            if not home_stats or not away_stats:
+                print(f"⚠️  Fixture {fixture_id}: team name mismatch between DB and statistics response, skipping.")
+                continue
+
+            conn.execute("""
+                UPDATE historical_matches
+                SET home_shots = ?, away_shots = ?,
+                    home_shots_ot = ?, away_shots_ot = ?,
+                    home_corners = ?, away_corners = ?
+                WHERE match_id = ?
+            """, [
+                home_stats["shots"], away_stats["shots"],
+                home_stats["shots_ot"], away_stats["shots_ot"],
+                home_stats["corners"], away_stats["corners"],
+                fixture_id,
+            ])
+            updated += 1
+
+        except requests.exceptions.RequestException as e:
+            print(f"❌ Network error fetching statistics for fixture {fixture_id}: {e}")
+            continue
+
+    conn.close()
+    print(f"✅ Backfilled statistics for {updated}/{len(targets)} matches.")
+
+
 def update_database(df, table_name="historical_matches"):
     """Upserts fixture data into DuckDB."""
     if df.empty:
@@ -584,6 +684,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Football Predictor Data Pipeline CLI")
     parser.add_argument("--build-db",     action="store_true", help="Initialize the database schema")
     parser.add_argument("--fetch-today",  action="store_true", help="Fetch today's fixtures and store them")
+    parser.add_argument("--backfill-stats", action="store_true",
+                         help="Backfill shots/shots-on-target/corners for recently finished matches")
     args = parser.parse_args()
 
     if args.build_db:
@@ -601,7 +703,13 @@ if __name__ == "__main__":
                 status     VARCHAR,
                 odds_home  REAL,
                 odds_draw  REAL,
-                odds_away  REAL
+                odds_away  REAL,
+                home_shots    INTEGER,
+                away_shots    INTEGER,
+                home_shots_ot INTEGER,
+                away_shots_ot INTEGER,
+                home_corners  INTEGER,
+                away_corners  INTEGER
             )
         """)
         conn.close()
@@ -611,3 +719,6 @@ if __name__ == "__main__":
         df_today = fetch_todays_fixtures_from_api()
         if not df_today.empty:
             update_database(df_today, "historical_matches")
+
+    elif args.backfill_stats:
+        backfill_match_statistics()

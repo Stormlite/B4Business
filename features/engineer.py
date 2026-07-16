@@ -44,6 +44,9 @@ FEATURE_COLS = [
     "h_roll_btts",     "a_roll_btts",
     # Composite signals
     "home_adv_score",  "shot_ratio",
+    # In-season standing (points-per-game, goal-diff-per-game, expanding within season)
+    "h_season_ppg",    "a_season_ppg",   "standing_ppg_gap",
+    "h_season_gdpg",   "a_season_gdpg",
     # League context
     "league_enc",
 ]
@@ -156,14 +159,28 @@ def _build_rolling_stats(df: pd.DataFrame, window: int = ROLLING_WINDOW) -> pd.D
     df = df.copy().sort_values("match_date").reset_index(drop=True)
     df["_idx"] = df.index
 
+    # Season key for standing features below: real 'season' for CSV training
+    # data; for live DuckDB data (no season column), infer season boundaries
+    # from >60-day gaps in each competition's match sequence (summer breaks).
+    if "season" in df.columns:
+        df["_season_key"] = df["competition"].astype(str) + "_" + df["season"].astype(str)
+    else:
+        df["_season_key"] = ""
+        for comp, idx in df.groupby("competition").groups.items():
+            sub = df.loc[idx].sort_values("match_date")
+            gap_days = sub["match_date"].diff().dt.days.fillna(0)
+            season_num = (gap_days > 60).cumsum()
+            df.loc[sub.index, "_season_key"] = str(comp) + "_s" + season_num.astype(str)
+
     # Determine which columns are available
     shots_available   = "HS" in df.columns and "AS" in df.columns
     shots_ot_avail    = "HST" in df.columns and "AST" in df.columns
     corners_avail     = "HC" in df.columns and "AC" in df.columns
 
     def _side(team_col, sc, cc, sh, st, co, is_home_val):
-        cols = ["_idx", "match_date", team_col, sc, cc]
-        renames = {"_idx": "_idx", "match_date": "date", team_col: "team", sc: "scored", cc: "conceded"}
+        cols = ["_idx", "match_date", team_col, sc, cc, "_season_key"]
+        renames = {"_idx": "_idx", "match_date": "date", team_col: "team", sc: "scored", cc: "conceded",
+                   "_season_key": "season_key"}
         extras = {}
         if shots_available:
             cols.append(sh); renames[sh] = "shots"
@@ -200,8 +217,36 @@ def _build_rolling_stats(df: pd.DataFrame, window: int = ROLLING_WINDOW) -> pd.D
     hist["roll_over25"] = hist.groupby("team")["over25_ind"].transform(_roll)
     hist["roll_btts"]   = hist.groupby("team")["btts_ind"].transform(_roll)
 
+    # In-season standing: points-per-game and goal-diff-per-game, EXPANDING
+    # (not fixed rolling window) within (team, season) so it reflects the
+    # whole season's form so far — distinct from roll_scored/conceded's
+    # last-10-games window. Points-per-game is just the expanding mean of
+    # match points, so no separate cumsum/count division needed. shift(1)
+    # keeps it leakage-free; early-season rows (few/no prior matches this
+    # season) come out NaN and fall back to the training median at predict
+    # time, same as every other feature here.
+    hist["match_points"] = np.select(
+        [hist["scored"] > hist["conceded"], hist["scored"] == hist["conceded"]], [3, 1], default=0
+    )
+    hist["goal_margin"] = hist["scored"] - hist["conceded"]
+    hist["season_ppg"] = hist.groupby(["team", "season_key"])["match_points"].transform(
+        lambda s: s.shift(1).expanding(min_periods=1).mean()
+    )
+    hist["season_gdpg"] = hist.groupby(["team", "season_key"])["goal_margin"].transform(
+        lambda s: s.shift(1).expanding(min_periods=1).mean()
+    )
+    # A team's first match of a new season has no prior season data to expand
+    # over — fill with the league-wide mean (ppg) / 0 (gdpg is symmetric by
+    # construction: one team's margin is another's negative) rather than
+    # leaving NaN, which would otherwise silently drop ~75 rows via the
+    # dropna() in generate_training_data, or crash train.py's LogisticRegression
+    # step (which — unlike predict.py's live path — doesn't NaN-fill first).
+    hist["season_ppg"]  = hist["season_ppg"].fillna(hist["season_ppg"].mean())
+    hist["season_gdpg"] = hist["season_gdpg"].fillna(0.0)
+
     roll_cols = [c for c in ["roll_scored", "roll_conceded", "roll_shots",
-                              "roll_shots_ot", "roll_corners", "roll_over25", "roll_btts"]
+                              "roll_shots_ot", "roll_corners", "roll_over25", "roll_btts",
+                              "season_ppg", "season_gdpg"]
                  if c in hist.columns]
 
     h_stats = hist[hist.is_home == 1][["_idx"] + roll_cols].copy()
@@ -216,6 +261,7 @@ def _build_rolling_stats(df: pd.DataFrame, window: int = ROLLING_WINDOW) -> pd.D
     df["comb_scoring"]  = df.get("h_roll_scored", 0) + df.get("a_roll_scored", 0)
     df["comb_conceded"] = df.get("h_roll_conceded", 0) + df.get("a_roll_conceded", 0)
     df["home_adv_score"] = df.get("h_roll_scored", 0) - df.get("a_roll_scored", 0)
+    df["standing_ppg_gap"] = df.get("h_season_ppg", 0) - df.get("a_season_ppg", 0)
 
     if "h_roll_shots_ot" in df.columns and "a_roll_shots_ot" in df.columns:
         df["comb_shots_ot"] = df["h_roll_shots_ot"] + df["a_roll_shots_ot"]
@@ -273,7 +319,17 @@ def _build_rolling_stats(df: pd.DataFrame, window: int = ROLLING_WINDOW) -> pd.D
             df[f"ip_{pfx}_home"] = (1 / df[odds_h].replace(0, np.nan)) / margin
             df[f"ip_{pfx}_draw"] = (1 / df[odds_d].replace(0, np.nan)) / margin
 
-    df.drop(columns=["_idx"], inplace=True, errors="ignore")
+    # Transparency flag: True only if this row ended up with a real market-odds
+    # value (any source above), False if ip_avg_home will be median-imputed at
+    # predict time. Without this, a match with no real odds and a match with
+    # real 50/50 odds look identical downstream — both just show a probability
+    # number, with no way to tell one is a genuine market read and the other
+    # is a fallback. Not used as a model feature (that would leak the same
+    # information the model already infers from the NaN itself); this is
+    # purely for the UI to display "no odds available" honestly.
+    df["has_market_odds"] = df.get("ip_avg_home", pd.Series(np.nan, index=df.index)).notna()
+
+    df.drop(columns=["_idx", "_season_key"], inplace=True, errors="ignore")
     return df
 
 
@@ -316,7 +372,7 @@ def generate_training_data(use_csv: bool = True) -> pd.DataFrame:
         "target_over25", "target_over05", "target_btts",
         "target_home_win", "target_draw", "target_away_win",
     ]
-    keep = ["match_id", "match_date", "competition", "home_team", "away_team"]
+    keep = ["match_id", "match_date", "competition", "home_team", "away_team", "has_market_odds"]
 
     return df[keep + feat_cols + target_cols].dropna(subset=feat_cols[:4])
 
@@ -334,7 +390,7 @@ def generate_feature_pipeline(extract_live_today_only: bool = False) -> pd.DataF
         today_str = pd.Timestamp.now().strftime("%Y-%m-%d")
         df_today = df[df["match_date"].dt.strftime("%Y-%m-%d") == today_str]
         feat_cols = get_available_feature_cols(df_today)
-        id_cols = ["match_id", "match_date", "home_team", "away_team"]
+        id_cols = ["match_id", "match_date", "home_team", "away_team", "has_market_odds"]
         return df_today[id_cols + feat_cols]
 
     # Training path — prefer CSV
