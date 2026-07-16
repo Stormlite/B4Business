@@ -64,26 +64,43 @@ def dispatch_whatsapp_alerts():
     # window"). This applies to sandbox AND paid production numbers alike;
     # it's a WhatsApp platform rule, not a sandbox limitation.
     #
-    # The only real fix is a pre-approved WhatsApp Message Template sent via
-    # ContentSid + ContentVariables instead of a raw Body string. One-time
-    # setup:
-    #   1. Twilio Console → Messaging → Content Template Builder → create a
-    #      WhatsApp template with ONE body variable, e.g.:
-    #        "{{1}}"
-    #      (a single variable holding the whole picks digest keeps this
-    #      working without needing template re-approval every time the
-    #      digest's content/structure changes)
-    #   2. Submit for WhatsApp approval (usually fast, sometimes same-day)
-    #   3. Once approved, set TWILIO_CONTENT_SID (repo secret) to that
-    #      template's SID (starts with "HX...")
+    # The Sandbox specifically CANNOT use custom-created templates at all —
+    # only its 3 pre-approved ones (Appointment Reminders, Order
+    # Notifications, Verification Codes). "Order Notifications" is used here
+    # since it has the most variable slots (4):
+    #   "Your {{1}} order of {{2}} has shipped and should be delivered on
+    #    {{3}}. Details: {{4}}"
+    # The picks digest is repurposed into that fixed skeleton below — it will
+    # visibly read as a shipping notification, not a clean picks message.
+    # This is the free option; a real WhatsApp Sender (paid Twilio account)
+    # is needed for a custom-worded template.
+    #
+    # One-time setup: Twilio Console → Content Template Builder (or "Try it
+    # out → WhatsApp") → find "Order Notifications" → copy its SID (starts
+    # "HX...") → set as TWILIO_CONTENT_SID repo secret.
     # Until TWILIO_CONTENT_SID is set, this falls back to a free-form send,
     # which will reliably fail with 63016 outside a live session — useful
     # only for manual testing right after texting the bot yourself.
     try:
         if content_sid:
+            # Compact one-line-per-pick summary for the "Details" slot —
+            # kept short since WhatsApp template variables have a length cap.
+            lines = []
+            for _, row in picks.iterrows():
+                o25 = row["over_2_5_probability"] * 100
+                lines.append(f"{row['home_team']} v {row['away_team']}: O2.5 {o25:.0f}%")
+            details = " | ".join(lines)
+            if len(details) > 900:
+                details = details[:880] + f"...(+{len(picks) - 1} more, see app)"
+
             message = client.messages.create(
                 content_sid=content_sid,
-                content_variables=json.dumps({"1": msg_body}),
+                content_variables=json.dumps({
+                    "1": "B4Business",
+                    "2": f"{len(picks)} High-Confidence Pick{'s' if len(picks) != 1 else ''}",
+                    "3": "today",
+                    "4": details,
+                }),
                 from_="whatsapp:+14155238886",
                 to=f"whatsapp:{target_num}",
             )
