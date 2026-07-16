@@ -1,5 +1,5 @@
 """scripts/notify.py — WhatsApp alerts for high-confidence daily picks via Twilio"""
-import sys, os
+import sys, os, time, json
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from models.predict import score_todays_fixtures
@@ -8,6 +8,7 @@ def dispatch_whatsapp_alerts():
     account_sid = os.getenv("TWILIO_ACCOUNT_SID")
     auth_token  = os.getenv("TWILIO_AUTH_TOKEN")
     target_num  = os.getenv("TARGET_WHATSAPP_NUMBER")
+    content_sid = os.getenv("TWILIO_CONTENT_SID")  # see setup note below
 
     if not all([account_sid, auth_token, target_num]):
         print("⚠️  Twilio credentials missing. Skipping notification.")
@@ -50,48 +51,78 @@ def dispatch_whatsapp_alerts():
 
     msg_body += "_Automated forecast · B4Business ML pipeline_"
 
-    # NOTE: from_ number below (+14155238886) is Twilio's shared WhatsApp *Sandbox*
-    # number, not a production sender. The sandbox requires the recipient to text
-    # "join <sandbox-code>" to that number, and that opt-in EXPIRES 3 DAYS after
-    # joining — after which sends silently fail to reach the phone even though the
-    # API call itself can still succeed. If alerts have stopped arriving, first
-    # check WhatsApp for a "sandbox session expired" style message and re-join.
-    # For a permanent fix, register a production WhatsApp sender in the Twilio
-    # console so this stops depending on a 3-day opt-in window.
     from twilio.rest import Client
     from twilio.base.exceptions import TwilioRestException
 
     client = Client(account_sid, auth_token)
+
+    # WhatsApp only allows free-form (Body-only) business-initiated messages
+    # within a 24-hour session window that opens when the recipient last
+    # messaged the Twilio number. A fully automated daily push notification
+    # will essentially always run outside that window — confirmed in
+    # production by Twilio error 63016 ("outside the allowed messaging
+    # window"). This applies to sandbox AND paid production numbers alike;
+    # it's a WhatsApp platform rule, not a sandbox limitation.
+    #
+    # The only real fix is a pre-approved WhatsApp Message Template sent via
+    # ContentSid + ContentVariables instead of a raw Body string. One-time
+    # setup:
+    #   1. Twilio Console → Messaging → Content Template Builder → create a
+    #      WhatsApp template with ONE body variable, e.g.:
+    #        "{{1}}"
+    #      (a single variable holding the whole picks digest keeps this
+    #      working without needing template re-approval every time the
+    #      digest's content/structure changes)
+    #   2. Submit for WhatsApp approval (usually fast, sometimes same-day)
+    #   3. Once approved, set TWILIO_CONTENT_SID (repo secret) to that
+    #      template's SID (starts with "HX...")
+    # Until TWILIO_CONTENT_SID is set, this falls back to a free-form send,
+    # which will reliably fail with 63016 outside a live session — useful
+    # only for manual testing right after texting the bot yourself.
     try:
-        message = client.messages.create(
-            body=msg_body,
-            from_="whatsapp:+14155238886",
-            to=f"whatsapp:{target_num}",
-        )
+        if content_sid:
+            message = client.messages.create(
+                content_sid=content_sid,
+                content_variables=json.dumps({"1": msg_body}),
+                from_="whatsapp:+14155238886",
+                to=f"whatsapp:{target_num}",
+            )
+        else:
+            print("⚠️  TWILIO_CONTENT_SID not set — sending free-form, which will "
+                  "fail with error 63016 unless you've messaged the bot in the "
+                  "last 24 hours. See setup note in this file for the permanent fix.")
+            message = client.messages.create(
+                body=msg_body,
+                from_="whatsapp:+14155238886",
+                to=f"whatsapp:{target_num}",
+            )
     except TwilioRestException as e:
-        # Previously an exception here would still be unhandled by the time it
-        # reached this point, but there was no diagnostic context printed first —
-        # now we surface the likely cause before failing the job.
         print(f"❌ Twilio failed to send the WhatsApp message. Error {e.code}: {e.msg}")
         if e.code == 63015:
             print("   → The target number has not joined (or has fallen out of) "
                   "the Twilio Sandbox. Re-send the 'join <code>' message on WhatsApp.")
+        elif e.code == 63016:
+            print("   → Outside the 24h session window and no approved template was "
+                  "used. Set TWILIO_CONTENT_SID — see setup note above this line.")
         raise
 
     print(f"✅ WhatsApp message accepted by Twilio. SID: {message.sid} · status: {message.status}")
 
     # The create() call only confirms Twilio *accepted* the message, not that it
-    # was delivered. Poll once, briefly, for a fast-fail signal (e.g. sandbox
-    # opt-in expired) so that shows up in the Action logs instead of looking
-    # like a silent success.
-    import time
+    # was delivered. Poll once, briefly, for a fast-fail signal so that shows up
+    # in the Action logs instead of looking like a silent success.
     time.sleep(3)
     refreshed = client.messages(message.sid).fetch()
     print(f"📬 Delivery status after 3s: {refreshed.status}"
           + (f" (error {refreshed.error_code}: {refreshed.error_message})" if refreshed.error_code else ""))
     if refreshed.status in ("failed", "undelivered"):
-        print("⚠️  Message was not delivered. If error 63015, the sandbox opt-in "
-              "has likely expired — re-join via WhatsApp.")
+        if refreshed.error_code == 63015:
+            print("⚠️  Sandbox opt-in has likely expired — re-join via WhatsApp.")
+        elif refreshed.error_code == 63016:
+            print("⚠️  Outside the 24h session window. Set TWILIO_CONTENT_SID to send "
+                  "via an approved template instead — see setup note above.")
+        else:
+            print("⚠️  Message was not delivered — see error code above.")
 
 if __name__ == "__main__":
     dispatch_whatsapp_alerts()

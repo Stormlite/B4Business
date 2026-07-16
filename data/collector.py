@@ -352,6 +352,7 @@
 import os
 import argparse
 import datetime
+import time
 import requests
 import urllib3
 import pandas as pd
@@ -604,6 +605,12 @@ def backfill_match_statistics(days_back: int = 3, limit: int = 50):
     for fixture_id, home_team, away_team in targets:
         try:
             response = requests.get(url, headers=headers, params={"fixture": fixture_id}, timeout=12)
+            if response.status_code == 429:
+                # Confirmed happening in practice on sequential calls — free-tier
+                # rate limit. Back off once and retry rather than just skip.
+                print(f"⏳ Rate limited on fixture {fixture_id}, waiting 5s and retrying once...")
+                time.sleep(5)
+                response = requests.get(url, headers=headers, params={"fixture": fixture_id}, timeout=12)
             if response.status_code != 200:
                 print(f"⚠️  Statistics fetch failed for fixture {fixture_id}: {response.status_code}")
                 continue
@@ -646,6 +653,11 @@ def backfill_match_statistics(days_back: int = 3, limit: int = 50):
         except requests.exceptions.RequestException as e:
             print(f"❌ Network error fetching statistics for fixture {fixture_id}: {e}")
             continue
+        finally:
+            # Confirmed by a real run: sequential calls with no pacing hit a 429
+            # on the free tier. A small gap between requests is cheaper than
+            # relying on the single retry-after-429 above to carry the whole batch.
+            time.sleep(1.5)
 
     conn.close()
     print(f"✅ Backfilled statistics for {updated}/{len(targets)} matches.")
