@@ -8,7 +8,24 @@ def dispatch_whatsapp_alerts():
     account_sid = os.getenv("TWILIO_ACCOUNT_SID")
     auth_token  = os.getenv("TWILIO_AUTH_TOKEN")
     target_num  = os.getenv("TARGET_WHATSAPP_NUMBER")
-    content_sid = os.getenv("TWILIO_CONTENT_SID")  # see setup note below
+
+    # Three possible delivery modes, tried in this priority order:
+    #   1. TWILIO_CUSTOM_CONTENT_SID — a custom, freely-worded template with
+    #      ONE variable ({{1}} = the whole digest). Only works if Twilio
+    #      actually allows creating+approving a custom template without a
+    #      registered WhatsApp Sender — unconfirmed as of writing, worth
+    #      testing via Console → Content Template Builder → create.
+    #   2. TWILIO_SANDBOX_TEMPLATE_SID — the Sandbox's built-in "Order
+    #      Notifications" template (4 fixed variables), repurposed to carry
+    #      picks data. Confirmed working on Sandbox without a paid account.
+    #   3. Free-form Body message (no template) — default when neither SID
+    #      is set. Only works inside a live 24h session, i.e. you've
+    #      messaged the Sandbox number (join code or otherwise) recently.
+    #      Requires manually re-joining roughly every 3 days when the
+    #      Sandbox opt-in lapses — accepted tradeoff for a free research
+    #      project rather than upgrading Twilio.
+    custom_content_sid   = os.getenv("TWILIO_CUSTOM_CONTENT_SID")
+    sandbox_template_sid = os.getenv("TWILIO_SANDBOX_TEMPLATE_SID")
 
     if not all([account_sid, auth_token, target_num]):
         print("⚠️  Twilio credentials missing. Skipping notification.")
@@ -56,35 +73,18 @@ def dispatch_whatsapp_alerts():
 
     client = Client(account_sid, auth_token)
 
-    # WhatsApp only allows free-form (Body-only) business-initiated messages
-    # within a 24-hour session window that opens when the recipient last
-    # messaged the Twilio number. A fully automated daily push notification
-    # will essentially always run outside that window — confirmed in
-    # production by Twilio error 63016 ("outside the allowed messaging
-    # window"). This applies to sandbox AND paid production numbers alike;
-    # it's a WhatsApp platform rule, not a sandbox limitation.
-    #
-    # The Sandbox specifically CANNOT use custom-created templates at all —
-    # only its 3 pre-approved ones (Appointment Reminders, Order
-    # Notifications, Verification Codes). "Order Notifications" is used here
-    # since it has the most variable slots (4):
-    #   "Your {{1}} order of {{2}} has shipped and should be delivered on
-    #    {{3}}. Details: {{4}}"
-    # The picks digest is repurposed into that fixed skeleton below — it will
-    # visibly read as a shipping notification, not a clean picks message.
-    # This is the free option; a real WhatsApp Sender (paid Twilio account)
-    # is needed for a custom-worded template.
-    #
-    # One-time setup: Twilio Console → Content Template Builder (or "Try it
-    # out → WhatsApp") → find "Order Notifications" → copy its SID (starts
-    # "HX...") → set as TWILIO_CONTENT_SID repo secret.
-    # Until TWILIO_CONTENT_SID is set, this falls back to a free-form send,
-    # which will reliably fail with 63016 outside a live session — useful
-    # only for manual testing right after texting the bot yourself.
     try:
-        if content_sid:
-            # Compact one-line-per-pick summary for the "Details" slot —
-            # kept short since WhatsApp template variables have a length cap.
+        if custom_content_sid:
+            print("📨 Sending via custom template (TWILIO_CUSTOM_CONTENT_SID)...")
+            message = client.messages.create(
+                content_sid=custom_content_sid,
+                content_variables=json.dumps({"1": msg_body}),
+                from_="whatsapp:+14155238886",
+                to=f"whatsapp:{target_num}",
+            )
+        elif sandbox_template_sid:
+            print("📨 Sending via Sandbox's built-in 'Order Notifications' template "
+                  "(TWILIO_SANDBOX_TEMPLATE_SID)...")
             lines = []
             for _, row in picks.iterrows():
                 o25 = row["over_2_5_probability"] * 100
@@ -92,9 +92,8 @@ def dispatch_whatsapp_alerts():
             details = " | ".join(lines)
             if len(details) > 900:
                 details = details[:880] + f"...(+{len(picks) - 1} more, see app)"
-
             message = client.messages.create(
-                content_sid=content_sid,
+                content_sid=sandbox_template_sid,
                 content_variables=json.dumps({
                     "1": "B4Business",
                     "2": f"{len(picks)} High-Confidence Pick{'s' if len(picks) != 1 else ''}",
@@ -105,9 +104,8 @@ def dispatch_whatsapp_alerts():
                 to=f"whatsapp:{target_num}",
             )
         else:
-            print("⚠️  TWILIO_CONTENT_SID not set — sending free-form, which will "
-                  "fail with error 63016 unless you've messaged the bot in the "
-                  "last 24 hours. See setup note in this file for the permanent fix.")
+            print("📨 Sending free-form (Option 3) — requires an active 24h session. "
+                  "If this fails with 63015/63016, re-join the Sandbox on WhatsApp.")
             message = client.messages.create(
                 body=msg_body,
                 from_="whatsapp:+14155238886",
@@ -119,8 +117,9 @@ def dispatch_whatsapp_alerts():
             print("   → The target number has not joined (or has fallen out of) "
                   "the Twilio Sandbox. Re-send the 'join <code>' message on WhatsApp.")
         elif e.code == 63016:
-            print("   → Outside the 24h session window and no approved template was "
-                  "used. Set TWILIO_CONTENT_SID — see setup note above this line.")
+            print("   → Outside the 24h session window and no template was used. "
+                  "Either re-join the Sandbox now, or set TWILIO_SANDBOX_TEMPLATE_SID "
+                  "/ TWILIO_CUSTOM_CONTENT_SID to send outside the session window.")
         raise
 
     print(f"✅ WhatsApp message accepted by Twilio. SID: {message.sid} · status: {message.status}")
@@ -136,8 +135,8 @@ def dispatch_whatsapp_alerts():
         if refreshed.error_code == 63015:
             print("⚠️  Sandbox opt-in has likely expired — re-join via WhatsApp.")
         elif refreshed.error_code == 63016:
-            print("⚠️  Outside the 24h session window. Set TWILIO_CONTENT_SID to send "
-                  "via an approved template instead — see setup note above.")
+            print("⚠️  Outside the 24h session window and no template was used this "
+                  "run — either re-join now, or set a template SID env var.")
         else:
             print("⚠️  Message was not delivered — see error code above.")
 
