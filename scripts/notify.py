@@ -1,5 +1,6 @@
 """scripts/notify.py — WhatsApp alerts for high-confidence daily picks via Twilio"""
 import sys, os, time, json
+import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from models.predict import score_todays_fixtures
@@ -76,9 +77,39 @@ def dispatch_whatsapp_alerts():
     try:
         if custom_content_sid:
             print("📨 Sending via custom template (TWILIO_CUSTOM_CONTENT_SID)...")
+            # Matches the approved template:
+            #   "⚽ B4Business Daily Picks – {{1}}
+            #
+            #    Our model found {{2}} high-confidence selection(s) today:
+            #
+            #    1️⃣ {{3}}
+            #    2️⃣ {{4}}
+            #    3️⃣ {{5}}
+            #
+            #    Automated forecast, not betting advice. View more: b4business.streamlit.app"
+            # Fixed 3 pick-slots since templates can't have a variable count —
+            # this covers real usage (0-3 high-confidence picks/day so far).
+            # Extra picks beyond 3 get folded into slot 3 as a "+N more" note
+            # rather than dropped silently; unused slots show "—".
+            today_str = pd.Timestamp.now().strftime("%d %B %Y")
+            pick_lines = []
+            for _, row in picks.iterrows():
+                o25 = row["over_2_5_probability"] * 100
+                pick_lines.append(f"{row['home_team']} vs {row['away_team']}: Over 2.5 {o25:.0f}%")
+
+            slots = pick_lines[:3] + ["—"] * max(0, 3 - len(pick_lines))
+            if len(pick_lines) > 3:
+                slots[2] = f"{pick_lines[2]} (+{len(pick_lines) - 3} more, see app)"
+
             message = client.messages.create(
                 content_sid=custom_content_sid,
-                content_variables=json.dumps({"1": msg_body}),
+                content_variables=json.dumps({
+                    "1": today_str,
+                    "2": str(len(picks)),
+                    "3": slots[0],
+                    "4": slots[1],
+                    "5": slots[2],
+                }),
                 from_="whatsapp:+14155238886",
                 to=f"whatsapp:{target_num}",
             )
