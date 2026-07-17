@@ -51,6 +51,8 @@ jobs:
           TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
           TWILIO_AUTH_TOKEN: ${{ secrets.TWILIO_AUTH_TOKEN }}
           TARGET_WHATSAPP_NUMBER: ${{ secrets.TARGET_WHATSAPP_NUMBER }}
+          TWILIO_CUSTOM_CONTENT_SID: ${{ secrets.TWILIO_CUSTOM_CONTENT_SID }}
+          TWILIO_SANDBOX_TEMPLATE_SID: ${{ secrets.TWILIO_SANDBOX_TEMPLATE_SID }}
         run: |
           python scripts/notify.py
 
