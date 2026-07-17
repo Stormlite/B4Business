@@ -602,15 +602,28 @@ def backfill_match_statistics(days_back: int = 3, limit: int = 50):
     url = f"{API_FOOTBALL_BASE_URL}/fixtures/statistics"
     updated = 0
 
+    # Confirmed via API-Football's own rate-limit docs: free tier is 10
+    # requests/minute (separate from a 100/day cap). 1.5s pacing was ~40
+    # req/min — 4x over — which is exactly why every call in the previous
+    # run hit a 429 even after retrying once. 6.5s gives a small safety
+    # margin under the true 6s-per-request minimum for 10/min.
+    MIN_INTERVAL = 6.5
+
     for fixture_id, home_team, away_team in targets:
         try:
             response = requests.get(url, headers=headers, params={"fixture": fixture_id}, timeout=12)
-            if response.status_code == 429:
-                # Confirmed happening in practice on sequential calls — free-tier
-                # rate limit. Back off once and retry rather than just skip.
-                print(f"⏳ Rate limited on fixture {fixture_id}, waiting 5s and retrying once...")
-                time.sleep(5)
+
+            retry_count = 0
+            while response.status_code == 429 and retry_count < 2:
+                # Prefer the server's own Retry-After header when present —
+                # more reliable than guessing a fixed backoff.
+                wait = int(response.headers.get("Retry-After", 15))
+                print(f"⏳ Rate limited on fixture {fixture_id}, waiting {wait}s and retrying "
+                      f"(attempt {retry_count + 1}/2)...")
+                time.sleep(wait)
                 response = requests.get(url, headers=headers, params={"fixture": fixture_id}, timeout=12)
+                retry_count += 1
+
             if response.status_code != 200:
                 print(f"⚠️  Statistics fetch failed for fixture {fixture_id}: {response.status_code}")
                 continue
@@ -654,10 +667,9 @@ def backfill_match_statistics(days_back: int = 3, limit: int = 50):
             print(f"❌ Network error fetching statistics for fixture {fixture_id}: {e}")
             continue
         finally:
-            # Confirmed by a real run: sequential calls with no pacing hit a 429
-            # on the free tier. A small gap between requests is cheaper than
-            # relying on the single retry-after-429 above to carry the whole batch.
-            time.sleep(1.5)
+            # Proactive pacing between every request (success, skip, or
+            # exception) — see MIN_INTERVAL comment above for the math.
+            time.sleep(MIN_INTERVAL)
 
     conn.close()
     print(f"✅ Backfilled statistics for {updated}/{len(targets)} matches.")
