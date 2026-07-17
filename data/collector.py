@@ -683,11 +683,38 @@ def update_database(df, table_name="historical_matches"):
             status     VARCHAR,
             odds_home  REAL,
             odds_draw  REAL,
-            odds_away  REAL
+            odds_away  REAL,
+            home_shots    INTEGER,
+            away_shots    INTEGER,
+            home_shots_ot INTEGER,
+            away_shots_ot INTEGER,
+            home_corners  INTEGER,
+            away_corners  INTEGER
         )
     """)
     conn.register("df_temp", df)
-    conn.execute(f"INSERT OR REPLACE INTO {table_name} SELECT * FROM df_temp")
+
+    # Explicit column list + ON CONFLICT upsert instead of "INSERT OR REPLACE
+    # ... SELECT *". Two bugs that fixes:
+    #   1. SELECT * requires df_temp's column count to exactly match the
+    #      table's — broke the moment backfill_match_statistics() ALTERed the
+    #      table to 18 columns while a plain fetch only ever provides 12.
+    #   2. INSERT OR REPLACE fully replaces the row. Re-fetching an existing
+    #      match_id (e.g. status flipping to FINISHED) would have silently
+    #      wiped any already-backfilled shots/corners data back to NULL,
+    #      since this fetch never provides those columns. The upsert below
+    #      only ever touches the 12 columns it actually has data for.
+    fetch_cols = ["match_id", "match_date", "match_time", "competition",
+                  "home_team", "away_team", "home_score", "away_score",
+                  "status", "odds_home", "odds_draw", "odds_away"]
+    col_list = ", ".join(fetch_cols)
+    update_set = ", ".join(f"{c} = excluded.{c}" for c in fetch_cols if c != "match_id")
+
+    conn.execute(f"""
+        INSERT INTO {table_name} ({col_list})
+        SELECT {col_list} FROM df_temp
+        ON CONFLICT (match_id) DO UPDATE SET {update_set}
+    """)
     conn.close()
     print(f"✅ Wrote {len(df)} rows into DuckDB table '{table_name}'.")
 
