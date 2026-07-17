@@ -449,9 +449,9 @@ def fetch_live_market_odds():
         return {}
 
 
-def fetch_todays_fixtures_from_api():
+def fetch_fixtures_for_date(target_date: str = None):
     """
-    Fetches today's fixtures from API-Football v3.
+    Fetches fixtures for a given date from API-Football v3 (defaults to today).
     Correct endpoint: GET /fixtures?date=YYYY-MM-DD
     Docs: https://www.api-football.com/documentation-v3#tag/Fixtures
     """
@@ -463,14 +463,14 @@ def fetch_todays_fixtures_from_api():
     # ✅ FIXED: Auth goes in the header (not a query param)
     headers = {"x-apisports-key": api_key}
 
-    today = datetime.date.today().strftime("%Y-%m-%d")
+    target_date = target_date or datetime.date.today().strftime("%Y-%m-%d")
     live_odds_feed = fetch_live_market_odds()
 
     # ✅ FIXED: Correct endpoint path appended to the base URL
     url = f"{API_FOOTBALL_BASE_URL}/fixtures"
-    params = {"date": today}
+    params = {"date": target_date}
 
-    print(f"🔄 Requesting fixtures from API-Football for date: {today}...")
+    print(f"🔄 Requesting fixtures from API-Football for date: {target_date}...")
     try:
         response = requests.get(url, headers=headers, params=params, timeout=15)
 
@@ -494,7 +494,7 @@ def fetch_todays_fixtures_from_api():
 
     fixtures_list = data.get("response", [])
     if not fixtures_list:
-        print(f"ℹ️  No fixtures found for date: {today}")
+        print(f"ℹ️  No fixtures found for date: {target_date}")
         return pd.DataFrame()
 
     parsed_matches = []
@@ -534,7 +534,7 @@ def fetch_todays_fixtures_from_api():
 
         parsed_matches.append({
             "match_id":    fixture.get("id"),
-            "match_date":  fixture_date[:10] if fixture_date else today,
+            "match_date":  fixture_date[:10] if fixture_date else target_date,
             "match_time":  kickoff_time,
             "competition": league.get("name", "Unknown League"),
             "home_team":   home_name,
@@ -548,8 +548,13 @@ def fetch_todays_fixtures_from_api():
         })
 
     df = pd.DataFrame(parsed_matches)
-    print(f"✅ Parsed {len(df)} fixtures for {today}.")
+    print(f"✅ Parsed {len(df)} fixtures for {target_date}.")
     return df
+
+
+# Backward-compatible alias — some callers may still reference the old name.
+def fetch_todays_fixtures_from_api():
+    return fetch_fixtures_for_date()
 
 
 def backfill_match_statistics(days_back: int = 3, limit: int = 50):
@@ -767,9 +772,20 @@ if __name__ == "__main__":
         print("✅ Database schema initialized.")
 
     elif args.fetch_today:
-        df_today = fetch_todays_fixtures_from_api()
+        # Fetch tomorrow's fixtures too, not just today's. This pre-loads the
+        # data the "Tomorrow" toggle needs, and — more importantly — means
+        # tomorrow's fixtures are already sitting in the DB *before* midnight
+        # hits, closing the gap where the app showed nothing/stale data
+        # between 00:00 and whenever the (delayed) scheduled run actually
+        # executes for "today" the next calendar day.
+        df_today = fetch_fixtures_for_date()
         if not df_today.empty:
             update_database(df_today, "historical_matches")
+
+        tomorrow = (datetime.date.today() + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+        df_tomorrow = fetch_fixtures_for_date(tomorrow)
+        if not df_tomorrow.empty:
+            update_database(df_tomorrow, "historical_matches")
 
     elif args.backfill_stats:
         backfill_match_statistics()

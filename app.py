@@ -102,26 +102,37 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
 </style>
 """, unsafe_allow_html=True)
 
+# ── Day toggle ──────────────────────────────────────────────────────────────
+day_choice = st.radio(
+    "Day", ["Today", "Tomorrow"], horizontal=True, label_visibility="collapsed"
+)
+view_date = datetime.date.today() if day_choice == "Today" else datetime.date.today() + datetime.timedelta(days=1)
+view_date_str = view_date.strftime("%Y-%m-%d")
+
 # ── Header ────────────────────────────────────────────────────────────────────
-today = datetime.date.today().strftime("%A, %d %B %Y")
+today = view_date.strftime("%A, %d %B %Y")
 st.markdown(f"""
 <div class="b4b-header">
-  <div class="b4b-badge">Live · {today}</div>
+  <div class="b4b-badge">{"Live" if day_choice == "Today" else "Preview"} · {today}</div>
   <h1>⚽ B4Business Football Analytics</h1>
-  <p>Machine-learning predictions for today's fixtures · Over 2.5 · Over 0.5 · BTTS · 1X2</p>
+  <p>Machine-learning predictions for {"today's" if day_choice == "Today" else "tomorrow's"} fixtures · Over 2.5 · Over 0.5 · BTTS · 1X2</p>
 </div>
 """, unsafe_allow_html=True)
 
 # ── Load data ─────────────────────────────────────────────────────────────────
 with st.spinner("Loading predictions..."):
     try:
-        df = score_todays_fixtures()
+        df = score_todays_fixtures(target_date=view_date_str)
     except Exception as e:
         st.error(f"❌ Could not load predictions: {e}")
         st.stop()
 
 if df is None or df.empty:
-    st.info("ℹ️ No fixtures found for today. Check back tomorrow, or make sure your data pipeline has run.")
+    if day_choice == "Today":
+        st.info("ℹ️ No fixtures found for today. Check back later, or make sure your data pipeline has run.")
+    else:
+        st.info("ℹ️ Tomorrow's fixtures aren't available yet — they're normally pre-fetched by "
+                "the daily pipeline run. Check back after it's run today.")
     st.stop()
 
 # ── Sort control ──────────────────────────────────────────────────────────────

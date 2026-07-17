@@ -60,10 +60,12 @@ def _build_feature_matrix(df: pd.DataFrame, feat_cols: list, medians: dict) -> p
     return X
 
 
-def score_todays_fixtures() -> pd.DataFrame:
+def score_todays_fixtures(target_date: str = None) -> pd.DataFrame:
     """
-    Loads saved models and returns a scored DataFrame for today's fixtures.
-    Returns an empty DataFrame if models or data are missing.
+    Loads saved models and returns a scored DataFrame for the given date
+    (defaults to today). Returns an empty DataFrame if models or data are
+    missing. target_date='YYYY-MM-DD' lets the same scorer serve a
+    'Tomorrow' view using fixtures pre-fetched a day ahead by collector.py.
     """
     required = [MODEL_PATH, BTTS_MODEL_PATH, OUTCOME_MODEL_PATH]
     if not all(os.path.exists(p) for p in required):
@@ -84,7 +86,7 @@ def score_todays_fixtures() -> pd.DataFrame:
 
     medians = _load_medians()
 
-    df_today = generate_feature_pipeline(extract_live_today_only=True)
+    df_today = generate_feature_pipeline(extract_live_today_only=True, target_date=target_date)
     if df_today.empty:
         return pd.DataFrame()
 

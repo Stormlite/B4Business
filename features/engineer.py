@@ -377,18 +377,20 @@ def generate_training_data(use_csv: bool = True) -> pd.DataFrame:
     return df[keep + feat_cols + target_cols].dropna(subset=feat_cols[:4])
 
 
-def generate_feature_pipeline(extract_live_today_only: bool = False) -> pd.DataFrame:
+def generate_feature_pipeline(extract_live_today_only: bool = False, target_date: str = None) -> pd.DataFrame:
     """
     Legacy-compatible entry point (called by models/predict.py).
     For live predictions, pulls from DuckDB; for training, uses CSV data.
+    target_date: 'YYYY-MM-DD', defaults to today. Lets the same live pipeline
+    serve a 'Tomorrow' view using fixtures pre-fetched by collector.py.
     """
     if extract_live_today_only:
         df_raw = load_raw_data_from_db()
         if df_raw.empty:
             return pd.DataFrame()
         df = _build_rolling_stats(df_raw)
-        today_str = pd.Timestamp.now().strftime("%Y-%m-%d")
-        df_today = df[df["match_date"].dt.strftime("%Y-%m-%d") == today_str]
+        date_str = target_date or pd.Timestamp.now().strftime("%Y-%m-%d")
+        df_today = df[df["match_date"].dt.strftime("%Y-%m-%d") == date_str]
         feat_cols = get_available_feature_cols(df_today)
         id_cols = ["match_id", "match_date", "home_team", "away_team", "has_market_odds"]
         return df_today[id_cols + feat_cols]
