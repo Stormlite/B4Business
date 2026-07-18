@@ -1,6 +1,7 @@
 import sys, os
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
+import math
 import streamlit as st
 import datetime
 import pandas as pd
@@ -16,104 +17,219 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# ── Global CSS ────────────────────────────────────────────────────────────────
-st.markdown("""
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+# ── Theme tokens (Material Design 3 — tonal color roles + elevation) ──────────
+# Matchday: light, warm pitch-day. Night Match: dark, stadium-under-lights.
+# Both share the same role structure (primary/secondary/tertiary containers,
+# surface tiers, outline) so every downstream component only ever references
+# roles, never raw hex — swapping THEMES[name] is the entire re-skin.
+THEMES = {
+    "Matchday": {
+        "mode": "light",
+        "primary": "#1B5E3F", "primary_container": "#D7F0DE", "on_primary_container": "#0A3320",
+        "secondary": "#C97A0E", "secondary_container": "#FCEACB", "on_secondary_container": "#593F06",
+        "tertiary": "#4C5FD1", "tertiary_container": "#E1E4FB", "on_tertiary_container": "#1F2A6B",
+        "surface": "#FAFAF7", "surface_container": "#FFFFFF", "surface_container_high": "#F1F3EE",
+        "on_surface": "#1A1C1A", "on_surface_variant": "#494A45", "outline": "#E1E4DC",
+        "error": "#8C1D18", "error_container": "#F9DEDC",
+        "display_font": "'Space Grotesk'", "mono_font": "'Roboto Mono'",
+        "shadow_1": "0 1px 2px rgba(20,24,20,0.06), 0 1px 3px rgba(20,24,20,0.08)",
+        "shadow_2": "0 2px 6px rgba(20,24,20,0.08), 0 4px 12px rgba(20,24,20,0.06)",
+        "card_border": "none", "bg_glow": "none",
+    },
+    "Night Match": {
+        "mode": "dark",
+        "primary": "#7FE3B4", "primary_container": "#0F3D2B", "on_primary_container": "#A8F5CC",
+        "secondary": "#FFC94A", "secondary_container": "#4A3600", "on_secondary_container": "#FFDD8A",
+        "tertiary": "#A6B4FF", "tertiary_container": "#2A2F63", "on_tertiary_container": "#C9D1FF",
+        "surface": "#0E1210", "surface_container": "#171B18", "surface_container_high": "#1F2420",
+        "on_surface": "#E5E8E2", "on_surface_variant": "#9CA39A", "outline": "#2B302B",
+        "error": "#FFB4A9", "error_container": "#4A2B22",
+        "display_font": "'Sora'", "mono_font": "'JetBrains Mono'",
+        "shadow_1": "none", "shadow_2": "none",
+        "card_border": "1px solid var(--outline)",
+        "bg_glow": "radial-gradient(circle at 20% 0%, rgba(127,227,180,0.06), transparent 40%)",
+    },
+}
 
-html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
+if "theme" not in st.session_state:
+    st.session_state.theme = "Matchday"
+
+# ── Theme + Day toggles ─────────────────────────────────────────────────────
+col_day, col_theme = st.columns([2, 1])
+with col_day:
+    day_choice = st.radio(
+        "Day", ["Today", "Tomorrow"], horizontal=True, label_visibility="collapsed", key="day_toggle"
+    )
+with col_theme:
+    theme_choice = st.radio(
+        "Theme", list(THEMES.keys()), horizontal=True, label_visibility="collapsed", key="theme"
+    )
+
+T = THEMES[theme_choice]
+
+# ── Global CSS — every rule below references T[...] tokens, never raw hex ────
+st.markdown(f"""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Sora:wght@500;600;700&family=Inter:wght@400;500;600;700;800&family=Roboto+Mono:wght@500;700&family=JetBrains+Mono:wght@500;700&display=swap');
+
+:root {{
+    --primary: {T['primary']};
+    --primary-container: {T['primary_container']};
+    --on-primary-container: {T['on_primary_container']};
+    --secondary: {T['secondary']};
+    --secondary-container: {T['secondary_container']};
+    --on-secondary-container: {T['on_secondary_container']};
+    --tertiary: {T['tertiary']};
+    --tertiary-container: {T['tertiary_container']};
+    --on-tertiary-container: {T['on_tertiary_container']};
+    --surface: {T['surface']};
+    --surface-container: {T['surface_container']};
+    --surface-container-high: {T['surface_container_high']};
+    --on-surface: {T['on_surface']};
+    --on-surface-variant: {T['on_surface_variant']};
+    --outline: {T['outline']};
+    --error: {T['error']};
+    --error-container: {T['error_container']};
+}}
+
+html, body, [class*="css"] {{ font-family: 'Inter', sans-serif; }}
+
+/* ── Re-skin Streamlit's own chrome, not just custom divs ───────────────── */
+[data-testid="stAppViewContainer"], [data-testid="stHeader"] {{
+    background: var(--surface);
+    background-image: {T['bg_glow']};
+}}
+.main .block-container {{ max-width: 900px; padding-top: 1.5rem; }}
+[data-testid="stMarkdownContainer"] p, .stMarkdown, label, .stCaption {{ color: var(--on-surface); }}
+[data-testid="stExpander"] {{
+    background: var(--surface-container); border: {T['card_border']}; border-radius: 16px;
+    box-shadow: {T['shadow_1']};
+}}
+hr {{ border-color: var(--outline); }}
+
+/* Segmented-control styling for st.radio (used for Day and Theme toggles) */
+[data-testid="stRadio"] > div {{
+    background: var(--surface-container-high); border-radius: 999px; padding: 4px;
+    display: inline-flex; gap: 2px; border: {T['card_border']};
+}}
+[data-testid="stRadio"] label {{
+    background: transparent; border-radius: 999px; padding: 7px 16px !important;
+    transition: all .15s; cursor: pointer;
+}}
+[data-testid="stRadio"] label:has(input:checked) {{
+    background: var(--surface-container); box-shadow: {T['shadow_1']};
+}}
+[data-testid="stRadio"] label:has(input:checked) p {{ color: var(--primary) !important; font-weight: 700; }}
+[data-testid="stRadio"] label p {{ font-family: 'Inter'; font-weight: 600; font-size: 0.85rem; color: var(--on-surface-variant); }}
+[data-testid="stRadio"] input {{ display: none; }}
+[data-testid="stRadio"] label > div:first-child {{ display: none; }}  /* hide native radio dot */
 
 /* Header */
-.b4b-header {
-    background: linear-gradient(135deg, #0F172A 0%, #1E3A5F 100%);
-    border-radius: 16px;
-    padding: 28px 32px 24px;
-    margin-bottom: 24px;
-}
-.b4b-header h1 { color: #F8FAFC; font-size: 1.9rem; font-weight: 800; margin: 0 0 4px; }
-.b4b-header p  { color: #94A3B8; font-size: 0.9rem; margin: 0; }
-.b4b-badge {
-    display: inline-block;
-    background: #10B981;
-    color: white;
-    font-size: 0.7rem;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    padding: 2px 10px;
-    border-radius: 999px;
-    text-transform: uppercase;
-    margin-bottom: 10px;
-}
+.b4b-header {{ padding: 6px 2px 20px; }}
+.b4b-header h1 {{
+    font-family: {T['display_font']}; color: var(--on-surface); font-size: 1.8rem;
+    font-weight: 700; margin: 4px 0 2px; letter-spacing: -0.01em;
+}}
+.b4b-header p {{ color: var(--on-surface-variant); font-size: 0.88rem; margin: 0; }}
+.b4b-badge {{
+    display: inline-flex; align-items: center; gap: 7px;
+    background: var(--primary-container); color: var(--on-primary-container);
+    font-size: 0.74rem; font-weight: 700; padding: 6px 13px; border-radius: 999px;
+}}
+.b4b-badge .dot {{ width: 7px; height: 7px; border-radius: 50%; background: var(--primary); }}
 
-/* KPI cards */
-.kpi-row { display: flex; gap: 14px; margin-bottom: 24px; }
-.kpi-card {
-    flex: 1;
-    background: #FFFFFF;
-    border: 1px solid #E2E8F0;
-    border-radius: 12px;
-    padding: 18px 20px;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.05);
-}
-.kpi-card .val { font-size: 2rem; font-weight: 800; color: #0F172A; line-height: 1; }
-.kpi-card .lbl { font-size: 0.78rem; color: #64748B; font-weight: 600;
-                  text-transform: uppercase; letter-spacing: 0.06em; margin-top: 6px; }
-.kpi-card .sub { font-size: 0.75rem; color: #94A3B8; margin-top: 2px; }
+/* Stat / KPI cards */
+.kpi-row {{ display: flex; gap: 14px; margin-bottom: 24px; }}
+.kpi-card {{
+    flex: 1; background: var(--surface-container); border: {T['card_border']};
+    border-radius: 16px; padding: 18px 20px; box-shadow: {T['shadow_1']};
+}}
+.kpi-card .val {{ font-family: {T['display_font']}; font-size: 1.9rem; font-weight: 700; color: var(--primary); line-height: 1; }}
+.kpi-card .lbl {{ font-size: 0.74rem; color: var(--on-surface-variant); font-weight: 600;
+                  text-transform: uppercase; letter-spacing: 0.05em; margin-top: 6px; }}
+.kpi-card .sub {{ font-size: 0.74rem; color: var(--on-surface-variant); opacity: .75; margin-top: 2px; }}
 
 /* Pick cards */
-.pick-card {
-    background: linear-gradient(135deg, #ECFDF5 0%, #D1FAE5 100%);
-    border: 1.5px solid #6EE7B7;
-    border-radius: 14px;
-    padding: 16px 20px;
-    margin-bottom: 12px;
-}
-.pick-card .match  { font-size: 1.05rem; font-weight: 700; color: #064E3B; }
-.pick-card .meta   { font-size: 0.82rem; color: #065F46; margin-top: 4px; }
-.pick-card .pills  { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
-.pill {
-    display: inline-block;
-    padding: 3px 12px;
-    border-radius: 999px;
-    font-size: 0.78rem;
-    font-weight: 600;
-}
-.pill-green  { background:#D1FAE5; color:#065F46; border:1px solid #6EE7B7; }
-.pill-blue   { background:#DBEAFE; color:#1E40AF; border:1px solid #93C5FD; }
-.pill-purple { background:#EDE9FE; color:#5B21B6; border:1px solid #C4B5FD; }
-.pill-gray   { background:#F1F5F9; color:#475569; border:1px solid #CBD5E1; }
-.pill-teal   { background:#CCFBF1; color:#0F766E; border:1px solid #5EEAD4; }
+.pick-card {{
+    background: var(--surface-container); border: {T['card_border']};
+    border-radius: 22px; padding: 18px 20px 16px; margin-bottom: 14px;
+    box-shadow: {T['shadow_2']}; position: relative; overflow: hidden;
+}}
+.pick-card.warn::before {{ content:""; position:absolute; left:0; top:0; bottom:0; width:4px; background: var(--secondary); }}
+.pick-card:not(.warn)::before {{ content:""; position:absolute; left:0; top:0; bottom:0; width:4px; background: var(--primary); }}
+.pick-top {{ display: flex; justify-content: space-between; align-items: flex-start; }}
+.pick-card .match {{ font-family: {T['display_font']}; font-size: 1.05rem; font-weight: 600; color: var(--on-surface); }}
+.pick-card .meta  {{ font-size: 0.8rem; color: var(--on-surface-variant); margin-top: 4px; }}
+.pick-card .meta .odds {{ font-family: {T['mono_font']}; font-weight: 500; }}
+.pick-card .pills {{ display: flex; gap: 7px; margin-top: 12px; flex-wrap: wrap; }}
+
+.pill {{ display: inline-block; padding: 6px 12px; border-radius: 999px; font-size: 0.74rem; font-weight: 600; }}
+.pill-green  {{ background: var(--primary-container);   color: var(--on-primary-container); }}
+.pill-teal   {{ background: var(--primary-container);   color: var(--on-primary-container); }}
+.pill-blue   {{ background: var(--secondary-container);  color: var(--on-secondary-container); }}
+.pill-purple {{ background: var(--tertiary-container);   color: var(--on-tertiary-container); }}
+.pill-gray   {{ background: var(--error-container);      color: var(--error); }}
+
+/* Confidence ring */
+.ring {{ width: 46px; height: 46px; flex-shrink: 0; }}
+.ring text {{ font-family: {T['mono_font']}; font-weight: 700; font-size: 11px; fill: var(--on-surface); }}
 
 /* Section titles */
-.section-title {
-    font-size: 0.75rem; font-weight: 700; text-transform: uppercase;
-    letter-spacing: 0.1em; color: #64748B; margin: 24px 0 12px;
-}
+.section-title {{
+    font-family: {T['display_font']}; font-size: 0.95rem; font-weight: 600;
+    color: var(--on-surface); margin: 26px 0 12px;
+}}
 
-/* Confidence bar */
-.conf-bar-wrap { background:#E2E8F0; border-radius:999px; height:6px; margin-top:6px; }
-.conf-bar      { height:6px; border-radius:999px; }
+/* Fixtures table */
+.table-card {{
+    background: var(--surface-container); border: {T['card_border']}; border-radius: 16px;
+    box-shadow: {T['shadow_1']}; overflow: hidden; margin-top: 4px;
+}}
+.table-scroll {{ max-height: 520px; overflow-y: auto; }}
+.b4b-table {{ width: 100%; border-collapse: collapse; font-size: 0.82rem; }}
+.b4b-table th {{
+    position: sticky; top: 0; text-align: left; font-weight: 600; color: var(--on-surface-variant);
+    font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.03em;
+    padding: 12px 14px; border-bottom: 1px solid var(--outline); background: var(--surface-container);
+}}
+.b4b-table td {{ padding: 10px 14px; border-bottom: 1px solid var(--outline); color: var(--on-surface); }}
+.b4b-table tr:last-child td {{ border-bottom: none; }}
+.b4b-table tr:hover td {{ background: var(--surface-container-high); }}
+.b4b-table td.num {{ font-family: {T['mono_font']}; font-weight: 500; }}
 
 /* Footer */
-.b4b-footer {
-    text-align: center; color: #94A3B8; font-size: 0.75rem;
-    margin-top: 40px; padding-top: 20px; border-top: 1px solid #E2E8F0;
-}
+.b4b-footer {{
+    text-align: center; color: var(--on-surface-variant); font-size: 0.75rem;
+    margin-top: 40px; padding-top: 20px; border-top: 1px solid var(--outline);
+}}
 </style>
 """, unsafe_allow_html=True)
 
-# ── Day toggle ──────────────────────────────────────────────────────────────
-day_choice = st.radio(
-    "Day", ["Today", "Tomorrow"], horizontal=True, label_visibility="collapsed"
-)
-view_date = datetime.date.today() if day_choice == "Today" else datetime.date.today() + datetime.timedelta(days=1)
-view_date_str = view_date.strftime("%Y-%m-%d")
+
+def confidence_ring(conf_pct: float, high_threshold: float = 60) -> str:
+    """Inline SVG ring — Material-style circular confidence indicator."""
+    conf_pct = max(0, min(100, conf_pct))
+    r = 18
+    circumference = 2 * math.pi * r
+    offset = circumference * (1 - conf_pct / 100)
+    color = "var(--primary)" if conf_pct > high_threshold else "var(--secondary)"
+    return f"""<svg class="ring" viewBox="0 0 44 44">
+      <circle cx="22" cy="22" r="{r}" stroke="var(--outline)" stroke-width="4" fill="none"/>
+      <circle cx="22" cy="22" r="{r}" stroke="{color}" stroke-width="4" fill="none"
+              stroke-dasharray="{circumference:.1f}" stroke-dashoffset="{offset:.1f}"
+              stroke-linecap="round" transform="rotate(-90 22 22)"/>
+      <text x="22" y="26" text-anchor="middle">{conf_pct:.0f}%</text>
+    </svg>"""
+
 
 # ── Header ────────────────────────────────────────────────────────────────────
+view_date = datetime.date.today() if day_choice == "Today" else datetime.date.today() + datetime.timedelta(days=1)
+view_date_str = view_date.strftime("%Y-%m-%d")
 today = view_date.strftime("%A, %d %B %Y")
+
 st.markdown(f"""
 <div class="b4b-header">
-  <div class="b4b-badge">{"Live" if day_choice == "Today" else "Preview"} · {today}</div>
+  <div class="b4b-badge"><span class="dot"></span>{"Live" if day_choice == "Today" else "Preview"} · {today}</div>
   <h1>⚽ B4Business Football Analytics</h1>
   <p>Machine-learning predictions for {"today's" if day_choice == "Today" else "tomorrow's"} fixtures · Over 2.5 · Over 0.5 · BTTS · 1X2</p>
 </div>
@@ -168,13 +284,13 @@ with k1:
     st.markdown(f"""
     <div class="kpi-card">
       <div class="val">{total}</div>
-      <div class="lbl">Fixtures Today</div>
+      <div class="lbl">Fixtures {day_choice}</div>
       <div class="sub">across all tracked leagues</div>
     </div>""", unsafe_allow_html=True)
 with k2:
     st.markdown(f"""
     <div class="kpi-card">
-      <div class="val" style="color:#10B981;">{high_conf}</div>
+      <div class="val">{high_conf}</div>
       <div class="lbl">High-Confidence Picks</div>
       <div class="sub">≥62% model probability</div>
     </div>""", unsafe_allow_html=True)
@@ -183,7 +299,7 @@ with k3:
     <div class="kpi-card">
       <div class="val">{avg_o25:.1f}%</div>
       <div class="lbl">Avg Over 2.5 Probability</div>
-      <div class="sub">across today's slate</div>
+      <div class="sub">across the slate</div>
     </div>""", unsafe_allow_html=True)
 
 # ── High-confidence picks ─────────────────────────────────────────────────────
@@ -209,21 +325,22 @@ if not df_hc.empty:
         odds_str = f"{oddsH:.2f} / {oddsD:.2f} / {oddsA:.2f}" if oddsH else "—"
         has_odds = row.get("has_market_odds", True)  # default True for older cached predictions
         conf  = row.get("over25_confidence", abs(row["over_2_5_probability"] - 0.5)) * 200
-        bar_color = "#10B981" if conf > 60 else "#F59E0B"
 
         st.markdown(f"""
-        <div class="pick-card">
-          <div class="match">{row['home_team']} <span style="color:#94A3B8;font-weight:400">vs</span> {row['away_team']}</div>
-          <div class="meta">⏰ {time_} &nbsp;·&nbsp; Odds: {odds_str}</div>
+        <div class="pick-card {'warn' if not has_odds else ''}">
+          <div class="pick-top">
+            <div>
+              <div class="match">{row['home_team']} <span style="color:var(--on-surface-variant);font-weight:400">vs</span> {row['away_team']}</div>
+              <div class="meta">⏰ {time_} &nbsp;·&nbsp; Odds <span class="odds">{odds_str}</span></div>
+            </div>
+            {confidence_ring(conf)}
+          </div>
           <div class="pills">
             <span class="pill pill-green">Over 2.5 &nbsp; {o25:.1f}%</span>
             {f'<span class="pill pill-teal">Over 0.5 &nbsp; {o05:.1f}%</span>' if o05 == o05 else ''}
             <span class="pill pill-blue">BTTS &nbsp; {btts:.1f}%</span>
             <span class="pill pill-purple">1X2 &nbsp; {hw:.0f}% / {dw:.0f}% / {aw:.0f}%</span>
             {'' if has_odds else '<span class="pill pill-gray">⚠️ No market odds — 1X2 less reliable</span>'}
-          </div>
-          <div class="conf-bar-wrap">
-            <div class="conf-bar" style="width:{min(conf,100):.0f}%;background:{bar_color};"></div>
           </div>
         </div>
         """, unsafe_allow_html=True)
@@ -254,7 +371,25 @@ if "odds_home" in df_filtered.columns:
 if hc_col:
     table["⭐"] = df_filtered["high_conf_pick"].map({True: "✅", False: ""})
 
-st.dataframe(table, use_container_width=True, hide_index=True)
+# Custom HTML table (rather than st.dataframe) so it actually follows the
+# theme — Streamlit's native dataframe component has its own fixed internal
+# styling that CSS variables can't reach. Wrapped in a scroll container so
+# it stays usable with 100+ fixtures, same as st.dataframe would.
+def _cell(col, val):
+    numeric_cols = {"Over 2.5", "Over 0.5", "BTTS", "1X2 (H/D/A)", "Odds (1/X/2)"}
+    cls = ' class="num"' if col in numeric_cols else ""
+    return f"<td{cls}>{val}</td>"
+
+rows_html = "".join(
+    "<tr>" + "".join(_cell(c, row[c]) for c in table.columns) + "</tr>"
+    for _, row in table.iterrows()
+)
+header_html = "".join(f"<th>{c}</th>" for c in table.columns)
+st.markdown(f"""
+<div class="table-card"><div class="table-scroll">
+<table class="b4b-table"><thead><tr>{header_html}</tr></thead><tbody>{rows_html}</tbody></table>
+</div></div>
+""", unsafe_allow_html=True)
 
 # ── Export ────────────────────────────────────────────────────────────────────
 csv_out = df_filtered.to_csv(index=False).encode("utf-8")
