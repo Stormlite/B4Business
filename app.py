@@ -18,12 +18,13 @@ st.set_page_config(
 )
 
 # ── Theme tokens (Material Design 3 — tonal color roles + elevation) ──────────
-# Matchday: light, warm pitch-day. Night Match: dark, stadium-under-lights.
-# Both share the same role structure (primary/secondary/tertiary containers,
-# surface tiers, outline) so every downstream component only ever references
-# roles, never raw hex — swapping THEMES[name] is the entire re-skin.
+# "Light" (design concept: Matchday — warm pitch-day) and "Dark" (design
+# concept: Night Match — stadium-under-lights). Both share the same role
+# structure (primary/secondary/tertiary containers, surface tiers, outline)
+# so every downstream component only ever references roles, never raw hex —
+# swapping THEMES[name] is the entire re-skin.
 THEMES = {
-    "Matchday": {
+    "Light": {
         "mode": "light",
         "primary": "#1B5E3F", "primary_container": "#D7F0DE", "on_primary_container": "#0A3320",
         "secondary": "#C97A0E", "secondary_container": "#FCEACB", "on_secondary_container": "#593F06",
@@ -36,7 +37,7 @@ THEMES = {
         "shadow_2": "0 2px 6px rgba(20,24,20,0.08), 0 4px 12px rgba(20,24,20,0.06)",
         "card_border": "none", "bg_glow": "none",
     },
-    "Night Match": {
+    "Dark": {
         "mode": "dark",
         "primary": "#7FE3B4", "primary_container": "#0F3D2B", "on_primary_container": "#A8F5CC",
         "secondary": "#FFC94A", "secondary_container": "#4A3600", "on_secondary_container": "#FFDD8A",
@@ -52,10 +53,12 @@ THEMES = {
 }
 
 if "theme" not in st.session_state:
-    st.session_state.theme = "Matchday"
+    st.session_state.theme = "Light"
 
 # ── Theme + Day toggles ─────────────────────────────────────────────────────
-col_day, col_theme = st.columns([2, 1])
+# Wider left column for Day, narrow right column for the Light/Dark toggle —
+# CSS below right-aligns its contents so it sits flush top-right.
+col_day, col_theme = st.columns([4, 1])
 with col_day:
     day_choice = st.radio(
         "Day", ["Today", "Tomorrow"], horizontal=True, label_visibility="collapsed", key="day_toggle"
@@ -123,6 +126,11 @@ hr {{ border-color: var(--outline); }}
 [data-testid="stRadio"] label p {{ font-family: 'Inter'; font-weight: 600; font-size: 0.85rem; color: var(--on-surface-variant); }}
 [data-testid="stRadio"] input {{ display: none; }}
 [data-testid="stRadio"] label > div:first-child {{ display: none; }}  /* hide native radio dot */
+
+/* Push the Light/Dark toggle (2nd column in the top row) flush right */
+[data-testid="stHorizontalBlock"] > div:nth-child(2) [data-testid="stRadio"] {{
+    display: flex; justify-content: flex-end;
+}}
 
 /* Header */
 .b4b-header {{ padding: 6px 2px 20px; }}
