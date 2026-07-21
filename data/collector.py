@@ -503,9 +503,13 @@ def fetch_fixtures_for_date(target_date: str = None):
         league  = item.get("league", {})
         teams   = item.get("teams", {})
         goals   = item.get("goals", {})
+        score   = item.get("score", {})
+        halftime = score.get("halftime", {})
 
         home_name    = teams.get("home", {}).get("name")
         away_name    = teams.get("away", {}).get("name")
+        home_id      = teams.get("home", {}).get("id")
+        away_id      = teams.get("away", {}).get("id")
         fixture_date = fixture.get("date", "")
         kickoff_time = fixture_date[11:16] if len(fixture_date) >= 16 else "15:00"
 
@@ -533,18 +537,22 @@ def fetch_fixtures_for_date(target_date: str = None):
         status = "FINISHED" if status_short in ["FT", "AET", "PEN"] else "SCHEDULED"
 
         parsed_matches.append({
-            "match_id":    fixture.get("id"),
-            "match_date":  fixture_date[:10] if fixture_date else target_date,
-            "match_time":  kickoff_time,
-            "competition": league.get("name", "Unknown League"),
-            "home_team":   home_name,
-            "away_team":   away_name,
-            "home_score":  goals.get("home"),
-            "away_score":  goals.get("away"),
-            "status":      status,
-            "odds_home":   odds_h,
-            "odds_draw":   odds_d,
-            "odds_away":   odds_a,
+            "match_id":      fixture.get("id"),
+            "match_date":    fixture_date[:10] if fixture_date else target_date,
+            "match_time":    kickoff_time,
+            "competition":   league.get("name", "Unknown League"),
+            "home_team":     home_name,
+            "away_team":     away_name,
+            "home_team_id":  home_id,
+            "away_team_id":  away_id,
+            "home_score":    goals.get("home"),
+            "away_score":    goals.get("away"),
+            "home_ht_score": halftime.get("home"),
+            "away_ht_score": halftime.get("away"),
+            "status":        status,
+            "odds_home":     odds_h,
+            "odds_draw":     odds_d,
+            "odds_away":     odds_a,
         })
 
     df = pd.DataFrame(parsed_matches)
@@ -695,8 +703,12 @@ def update_database(df, table_name="historical_matches"):
             competition VARCHAR,
             home_team  VARCHAR,
             away_team  VARCHAR,
+            home_team_id INTEGER,
+            away_team_id INTEGER,
             home_score INTEGER,
             away_score INTEGER,
+            home_ht_score INTEGER,
+            away_ht_score INTEGER,
             status     VARCHAR,
             odds_home  REAL,
             odds_draw  REAL,
@@ -709,6 +721,13 @@ def update_database(df, table_name="historical_matches"):
             away_corners  INTEGER
         )
     """)
+    # Migration for DBs that already exist from before these 4 columns were
+    # added (same ALTER-if-missing pattern used for the statistics backfill).
+    existing_cols = {row[0] for row in conn.execute(f"DESCRIBE {table_name}").fetchall()}
+    for col, coltype in [("home_team_id", "INTEGER"), ("away_team_id", "INTEGER"),
+                          ("home_ht_score", "INTEGER"), ("away_ht_score", "INTEGER")]:
+        if col not in existing_cols:
+            conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {col} {coltype}")
     conn.register("df_temp", df)
 
     # Explicit column list + ON CONFLICT upsert instead of "INSERT OR REPLACE
@@ -722,7 +741,8 @@ def update_database(df, table_name="historical_matches"):
     #      since this fetch never provides those columns. The upsert below
     #      only ever touches the 12 columns it actually has data for.
     fetch_cols = ["match_id", "match_date", "match_time", "competition",
-                  "home_team", "away_team", "home_score", "away_score",
+                  "home_team", "away_team", "home_team_id", "away_team_id",
+                  "home_score", "away_score", "home_ht_score", "away_ht_score",
                   "status", "odds_home", "odds_draw", "odds_away"]
     col_list = ", ".join(fetch_cols)
     update_set = ", ".join(f"{c} = excluded.{c}" for c in fetch_cols if c != "match_id")
@@ -754,8 +774,12 @@ if __name__ == "__main__":
                 competition VARCHAR,
                 home_team  VARCHAR,
                 away_team  VARCHAR,
+                home_team_id INTEGER,
+                away_team_id INTEGER,
                 home_score INTEGER,
                 away_score INTEGER,
+                home_ht_score INTEGER,
+                away_ht_score INTEGER,
                 status     VARCHAR,
                 odds_home  REAL,
                 odds_draw  REAL,

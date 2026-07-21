@@ -94,6 +94,7 @@ def load_csv_data() -> pd.DataFrame:
     col_map = {
         "HomeTeam": "home_team", "AwayTeam": "away_team",
         "FTHG": "home_score",   "FTAG": "away_score",
+        "HTHG": "home_ht_score", "HTAG": "away_ht_score",
         "Div":  "competition",
     }
     raw = raw.rename(columns={k: v for k, v in col_map.items() if k in raw.columns})
@@ -124,7 +125,26 @@ def load_csv_data() -> pd.DataFrame:
 def load_raw_data_from_db() -> pd.DataFrame:
     """Loads matches from DuckDB (used for live prediction path)."""
     conn = duckdb.connect(DB_PATH)
-    query = """
+
+    # Some columns (team IDs, halftime score) were added via an ALTER TABLE
+    # migration inside collector.py's update_database() — only present once
+    # that's actually run. Check first so this doesn't hard-crash the live
+    # app if it's deployed before the next scheduled fetch runs the migration.
+    existing_cols = {row[0] for row in conn.execute("DESCRIBE historical_matches").fetchall()}
+
+    optional_selects = []
+    for col, cast in [("home_team_id", "INTEGER"), ("away_team_id", "INTEGER"),
+                       ("home_ht_score", "REAL"), ("away_ht_score", "REAL"),
+                       ("home_shots", "REAL"), ("away_shots", "REAL"),
+                       ("home_shots_ot", "REAL"), ("away_shots_ot", "REAL"),
+                       ("home_corners", "REAL"), ("away_corners", "REAL")]:
+        if col in existing_cols:
+            optional_selects.append(f"CAST({col} AS {cast}) AS {col}")
+        else:
+            optional_selects.append(f"CAST(NULL AS {cast}) AS {col}")
+    optional_sql = ",\n            ".join(optional_selects)
+
+    query = f"""
         SELECT
             match_id, match_date, competition, home_team, away_team,
             CAST(home_score AS REAL) AS home_score,
@@ -132,12 +152,24 @@ def load_raw_data_from_db() -> pd.DataFrame:
             status,
             CAST(odds_home AS REAL) AS odds_home,
             CAST(odds_draw AS REAL) AS odds_draw,
-            CAST(odds_away AS REAL) AS odds_away
+            CAST(odds_away AS REAL) AS odds_away,
+            {optional_sql}
         FROM historical_matches
         ORDER BY match_date ASC
     """
     df = conn.execute(query).df()
     conn.close()
+
+    # Rename to the CSV naming convention (HS/AS/HST/AST/HC/AC) that
+    # _build_rolling_stats() checks for — previously these backfilled
+    # columns were never selected at all here, so the entire statistics
+    # backfill feature never reached live predictions despite being
+    # correctly captured in the DB.
+    df = df.rename(columns={
+        "home_shots": "HS", "away_shots": "AS",
+        "home_shots_ot": "HST", "away_shots_ot": "AST",
+        "home_corners": "HC", "away_corners": "AC",
+    })
 
     df["match_date"] = pd.to_datetime(df["match_date"], errors="coerce")
     df["total_goals"]    = df["home_score"] + df["away_score"]
@@ -181,7 +213,6 @@ def _build_rolling_stats(df: pd.DataFrame, window: int = ROLLING_WINDOW) -> pd.D
         cols = ["_idx", "match_date", team_col, sc, cc, "_season_key"]
         renames = {"_idx": "_idx", "match_date": "date", team_col: "team", sc: "scored", cc: "conceded",
                    "_season_key": "season_key"}
-        extras = {}
         if shots_available:
             cols.append(sh); renames[sh] = "shots"
         if shots_ot_avail:
