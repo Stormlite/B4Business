@@ -2,12 +2,28 @@ import sys, os
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 import math
+import urllib.parse
 import streamlit as st
 import datetime
 import pandas as pd
 import joblib
 from models.predict import score_todays_fixtures
 from config import MODEL_PATH
+
+# ── SportyBet search links ───────────────────────────────────────────────────
+# Confirmed URL pattern from a manual search: sportybet.com/{region}/m/search?key={team}
+# "gh" = Ghana region — change to "ng" for Nigeria etc. if that's wrong; it's
+# the only thing that would need to change here. This is just a plain
+# hyperlink to SportyBet's own public search page (no login, no automation,
+# no scraping) — deliberately NOT full slip auto-generation, since that would
+# mean automating interactions with a real-money account against most
+# bookmakers' Terms of Service. This solves the actual stated pain point
+# (manually retyping team names) without that risk.
+SPORTYBET_REGION = "gh"
+
+def sportybet_search_url(team_name: str) -> str:
+    return f"https://www.sportybet.com/{SPORTYBET_REGION}/m/search?key={urllib.parse.quote_plus(team_name)}"
+
 
 # ── Page config ──────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -170,6 +186,14 @@ hr {{ border-color: var(--outline); }}
 .pick-card .meta  {{ font-size: 0.8rem; color: var(--on-surface-variant); margin-top: 4px; }}
 .pick-card .meta .odds {{ font-family: {T['mono_font']}; font-weight: 500; }}
 .pick-card .pills {{ display: flex; gap: 7px; margin-top: 12px; flex-wrap: wrap; }}
+.pick-card .search-links {{ display: flex; gap: 8px; margin-top: 12px; }}
+.pick-card .search-links a {{
+    font-size: 0.72rem; font-weight: 600; color: var(--primary);
+    background: var(--surface-container-high); border: {T['card_border'] if T['card_border'] != 'none' else '1px solid var(--outline)'};
+    padding: 6px 13px; border-radius: 999px; text-decoration: none;
+    display: inline-flex; align-items: center; gap: 5px; transition: opacity .15s;
+}}
+.pick-card .search-links a:hover {{ opacity: 0.75; }}
 
 .pill {{ display: inline-block; padding: 6px 12px; border-radius: 999px; font-size: 0.74rem; font-weight: 600; }}
 .pill-green  {{ background: var(--primary-container);   color: var(--on-primary-container); }}
@@ -349,6 +373,10 @@ if not df_hc.empty:
             <span class="pill pill-blue">BTTS &nbsp; {btts:.1f}%</span>
             <span class="pill pill-purple">1X2 &nbsp; {hw:.0f}% / {dw:.0f}% / {aw:.0f}%</span>
             {'' if has_odds else '<span class="pill pill-gray">⚠️ No market odds — 1X2 less reliable</span>'}
+          </div>
+          <div class="search-links">
+            <a href="{sportybet_search_url(row['home_team'])}" target="_blank" rel="noopener">🔍 {row['home_team']}</a>
+            <a href="{sportybet_search_url(row['away_team'])}" target="_blank" rel="noopener">🔍 {row['away_team']}</a>
           </div>
         </div>
         """, unsafe_allow_html=True)
