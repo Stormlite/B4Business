@@ -22,11 +22,12 @@ from sklearn.pipeline import Pipeline
 from sklearn.model_selection import cross_val_score, StratifiedKFold
 
 from features.engineer import generate_training_data, get_available_feature_cols
-from config import MODEL_PATH, OVER05_MODEL_PATH, BTTS_MODEL_PATH, OUTCOME_MODEL_PATH
+from config import MODEL_PATH, OVER05_MODEL_PATH, CORNERS_MODEL_PATH, BTTS_MODEL_PATH, OUTCOME_MODEL_PATH
 
 MODEL_DIR         = os.path.dirname(MODEL_PATH)
 FEAT_COLS_OVER25  = os.path.join(MODEL_DIR, "over25_feature_cols.joblib")
 FEAT_COLS_OVER05  = os.path.join(MODEL_DIR, "over05_feature_cols.joblib")
+FEAT_COLS_CORNERS = os.path.join(MODEL_DIR, "corners_feature_cols.joblib")
 FEAT_COLS_BTTS    = os.path.join(MODEL_DIR, "btts_feature_cols.joblib")
 FEAT_COLS_OUTCOME = os.path.join(MODEL_DIR, "outcome_feature_cols.joblib")
 # Training medians saved so predict.py can impute columns missing from live DuckDB data
@@ -124,6 +125,38 @@ def run_training_pipeline(verbose: bool = True) -> bool:
         model_over05.fit(X, y_over05)
         joblib.dump(model_over05, OVER05_MODEL_PATH)
         joblib.dump(feat_cols, FEAT_COLS_OVER05)
+
+    # ── 1c. Over 9.5 Corners ────────────────────────────────────────────
+    if verbose: print("\n🧠 Training Over 9.5 Corners model...")
+    # Unlike goals, corners aren't derivable from the fixture result itself —
+    # many rows (especially live-collected ones not yet hit by
+    # backfill_match_statistics()) won't have real corner data at all.
+    # Filter to rows that actually have it rather than let NaN silently
+    # propagate into training.
+    corners_mask = df_train["target_over_corners"].notna()
+    y_corners = df_train.loc[corners_mask, "target_over_corners"].astype(int)
+    X_corners = X.loc[corners_mask]
+    if len(y_corners) < 50 or y_corners.nunique() < 2:
+        print(f"⚠️  Only {len(y_corners)} rows with usable corner data — skipping Over 9.5 Corners model.")
+    else:
+        # 9.5 was chosen from the actual data distribution (49.5% over across
+        # 5,329 matches) — close enough to 50/50 that, unlike Over 0.5 goals,
+        # the standard balanced=True ensemble should be well-calibrated here.
+        # Still checking Brier score against the correct naive baseline for a
+        # near-balanced target (predicting the constant base rate), not just
+        # accuracy, given the Over 0.5 calibration lesson.
+        model_corners = _build_ensemble()
+        cv_acc   = cross_val_score(model_corners, X_corners, y_corners, cv=cv, scoring="accuracy")
+        cv_brier = cross_val_score(model_corners, X_corners, y_corners, cv=cv, scoring="neg_brier_score")
+        base_rate = float(y_corners.mean())
+        naive_brier = base_rate * (1 - base_rate)
+        if verbose:
+            print(f"   Training rows with corner data: {len(y_corners)} (base rate: {base_rate:.3f} over)")
+            print(f"   CV accuracy: {cv_acc.mean():.4f} ± {cv_acc.std():.4f}")
+            print(f"   CV Brier score: {-cv_brier.mean():.4f} (naive constant-prediction baseline: {naive_brier:.4f})")
+        model_corners.fit(X_corners, y_corners)
+        joblib.dump(model_corners, CORNERS_MODEL_PATH)
+        joblib.dump(feat_cols, FEAT_COLS_CORNERS)
 
     # ── 2. Both Teams to Score ────────────────────────────────────────────
     if verbose: print("🧠 Training BTTS model...")

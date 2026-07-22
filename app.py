@@ -201,6 +201,7 @@ hr {{ border-color: var(--outline); }}
 .pill-blue   {{ background: var(--secondary-container);  color: var(--on-secondary-container); }}
 .pill-purple {{ background: var(--tertiary-container);   color: var(--on-tertiary-container); }}
 .pill-gray   {{ background: var(--error-container);      color: var(--error); }}
+.pill-amber  {{ background: var(--surface-container-high); color: var(--on-surface); border: 1px solid var(--outline); }}
 
 /* Confidence ring */
 .ring {{ width: 46px; height: 46px; flex-shrink: 0; }}
@@ -263,7 +264,7 @@ st.markdown(f"""
 <div class="b4b-header">
   <div class="b4b-badge"><span class="dot"></span>{"Live" if day_choice == "Today" else "Preview"} · {today}</div>
   <h1>⚽ B4Business Football Analytics</h1>
-  <p>Machine-learning predictions for {"today's" if day_choice == "Today" else "tomorrow's"} fixtures · Over 2.5 · Over 0.5 · BTTS · 1X2</p>
+  <p>Machine-learning predictions for {"today's" if day_choice == "Today" else "tomorrow's"} fixtures · Over 2.5 · Over 0.5 · BTTS · Corners · 1X2</p>
 </div>
 """, unsafe_allow_html=True)
 
@@ -346,6 +347,7 @@ if not df_hc.empty:
     for _, row in df_hc.iterrows():
         o25   = row["over_2_5_probability"] * 100
         o05   = row.get("over_0_5_probability", float("nan")) * 100
+        corn  = row.get("corners_probability", float("nan")) * 100
         btts  = row.get("btts_probability", 0) * 100
         hw    = row.get("prob_home_win", 0) * 100
         dw    = row.get("prob_draw", 0) * 100
@@ -371,6 +373,7 @@ if not df_hc.empty:
             <span class="pill pill-green">Over 2.5 &nbsp; {o25:.1f}%</span>
             {f'<span class="pill pill-teal">Over 0.5 &nbsp; {o05:.1f}%</span>' if o05 == o05 else ''}
             <span class="pill pill-blue">BTTS &nbsp; {btts:.1f}%</span>
+            {f'<span class="pill pill-amber">Corners 9.5 &nbsp; {corn:.1f}%</span>' if corn == corn else ''}
             <span class="pill pill-purple">1X2 &nbsp; {hw:.0f}% / {dw:.0f}% / {aw:.0f}%</span>
             {'' if has_odds else '<span class="pill pill-gray">⚠️ No market odds — 1X2 less reliable</span>'}
           </div>
@@ -394,6 +397,10 @@ if "over_0_5_probability" in df_filtered.columns:
         lambda v: "—" if pd.isna(v) else f"{v:.1f}%"
     )
 table["BTTS"]      = (df_filtered.get("btts_probability", 0) * 100).map("{:.1f}%".format)
+if "corners_probability" in df_filtered.columns:
+    table["Corners 9.5"] = (df_filtered["corners_probability"] * 100).map(
+        lambda v: "—" if pd.isna(v) else f"{v:.1f}%"
+    )
 table["1X2 (H/D/A)"] = df_filtered.apply(
     lambda r: f"{r.get('prob_home_win',0)*100:.0f}% / {r.get('prob_draw',0)*100:.0f}% / {r.get('prob_away_win',0)*100:.0f}%",
     axis=1
@@ -412,7 +419,7 @@ if hc_col:
 # styling that CSS variables can't reach. Wrapped in a scroll container so
 # it stays usable with 100+ fixtures, same as st.dataframe would.
 def _cell(col, val):
-    numeric_cols = {"Over 2.5", "Over 0.5", "BTTS", "1X2 (H/D/A)", "Odds (1/X/2)"}
+    numeric_cols = {"Over 2.5", "Over 0.5", "BTTS", "Corners 9.5", "1X2 (H/D/A)", "Odds (1/X/2)"}
     cls = ' class="num"' if col in numeric_cols else ""
     return f"<td{cls}>{val}</td>"
 

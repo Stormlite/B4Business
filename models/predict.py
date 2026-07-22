@@ -17,11 +17,12 @@ from features.engineer import (
     generate_feature_pipeline,
     get_available_feature_cols,
 )
-from config import MODEL_PATH, OVER05_MODEL_PATH, BTTS_MODEL_PATH, OUTCOME_MODEL_PATH, DB_PATH
+from config import MODEL_PATH, OVER05_MODEL_PATH, CORNERS_MODEL_PATH, BTTS_MODEL_PATH, OUTCOME_MODEL_PATH, DB_PATH
 
 MODEL_DIR         = os.path.dirname(MODEL_PATH)
 FEAT_COLS_OVER25  = os.path.join(MODEL_DIR, "over25_feature_cols.joblib")
 FEAT_COLS_OVER05  = os.path.join(MODEL_DIR, "over05_feature_cols.joblib")
+FEAT_COLS_CORNERS = os.path.join(MODEL_DIR, "corners_feature_cols.joblib")
 FEAT_COLS_BTTS    = os.path.join(MODEL_DIR, "btts_feature_cols.joblib")
 FEAT_COLS_OUTCOME = os.path.join(MODEL_DIR, "outcome_feature_cols.joblib")
 FEAT_MEDIANS_PATH = os.path.join(MODEL_DIR, "feature_medians.joblib")
@@ -78,9 +79,14 @@ def score_todays_fixtures(target_date: str = None) -> pd.DataFrame:
     # Over 0.5 is a newer market — model may not exist yet on older deployments
     # until the next training run, so it's optional rather than required.
     model_over05  = joblib.load(OVER05_MODEL_PATH) if os.path.exists(OVER05_MODEL_PATH) else None
+    # Corners is also a newer market — same optional-load pattern as Over 0.5,
+    # plus this one can genuinely be missing training data for a given run
+    # if too few rows had corner data (see train.py's guard).
+    model_corners = joblib.load(CORNERS_MODEL_PATH) if os.path.exists(CORNERS_MODEL_PATH) else None
 
     feat_over25  = joblib.load(FEAT_COLS_OVER25)  if os.path.exists(FEAT_COLS_OVER25)  else None
     feat_over05  = joblib.load(FEAT_COLS_OVER05)  if os.path.exists(FEAT_COLS_OVER05)  else None
+    feat_corners = joblib.load(FEAT_COLS_CORNERS) if os.path.exists(FEAT_COLS_CORNERS) else None
     feat_btts    = joblib.load(FEAT_COLS_BTTS)    if os.path.exists(FEAT_COLS_BTTS)    else None
     feat_outcome = joblib.load(FEAT_COLS_OUTCOME) if os.path.exists(FEAT_COLS_OUTCOME) else None
 
@@ -93,6 +99,7 @@ def score_todays_fixtures(target_date: str = None) -> pd.DataFrame:
     live_cols    = get_available_feature_cols(df_today)
     feat_over25  = feat_over25  or live_cols
     feat_over05  = feat_over05  or live_cols
+    feat_corners = feat_corners or live_cols
     feat_btts    = feat_btts    or live_cols
     feat_outcome = feat_outcome or live_cols
 
@@ -110,6 +117,12 @@ def score_todays_fixtures(target_date: str = None) -> pd.DataFrame:
     else:
         prob_over05 = np.full(len(df_today), np.nan)
 
+    if model_corners is not None:
+        X_corners    = _build_feature_matrix(df_today, feat_corners, medians)
+        prob_corners = model_corners.predict_proba(X_corners)[:, 1]
+    else:
+        prob_corners = np.full(len(df_today), np.nan)
+
     confidence = np.abs(prob_over25 - 0.5)
 
     df_output = pd.DataFrame({
@@ -118,6 +131,7 @@ def score_todays_fixtures(target_date: str = None) -> pd.DataFrame:
         "away_team":            df_today["away_team"],
         "over_2_5_probability": prob_over25.round(4),
         "over_0_5_probability": np.round(prob_over05, 4),
+        "corners_probability":  np.round(prob_corners, 4),
         "btts_probability":     prob_btts.round(4),
         "prob_home_win":        prob_outcome[:, 0].round(4),
         "prob_draw":            prob_outcome[:, 1].round(4),
