@@ -393,7 +393,10 @@ def fetch_live_market_odds():
     params = {
         "apiKey": api_key,          # ✅ goes as query param, not in the path
         "regions": "eu,us,uk,au",
-        "markets": "h2h",
+        "markets": "h2h,totals",    # totals = Over/Under market. NOTE: this
+                                     # roughly doubles the credit cost of this
+                                     # call (billed per market per region) —
+                                     # worth watching against quota.
         "oddsFormat": "decimal",
     }
 
@@ -424,6 +427,7 @@ def fetch_live_market_odds():
             # per-column training-median fallback (a neutral, data-derived
             # value) kicks in instead — see features/engineer.py.
             odds_home, odds_draw, odds_away = None, None, None
+            odds_over25, odds_under25 = None, None
 
             for bookmaker in match.get("bookmakers", []):
                 if bookmaker["key"] in ["sportybet", "onexbet", "bet365", "betway"]:
@@ -436,10 +440,24 @@ def fetch_live_market_odds():
                                     odds_away = outcome["price"]
                                 elif outcome["name"] == "Draw":
                                     odds_draw = outcome["price"]
+                        elif market["key"] == "totals":
+                            # Totals can carry multiple lines (1.5, 2.5, 3.5...) —
+                            # filter to exactly the 2.5 goals line, matching the
+                            # Over 2.5 market this model predicts.
+                            for outcome in market.get("outcomes", []):
+                                if outcome.get("point") != 2.5:
+                                    continue
+                                if outcome["name"] == "Over":
+                                    odds_over25 = outcome["price"]
+                                elif outcome["name"] == "Under":
+                                    odds_under25 = outcome["price"]
                     break  # stop after first matching bookmaker
 
             norm_key = f"{str(home_team).lower()} vs {str(away_team).lower()}"
-            odds_map[norm_key] = {"H": odds_home, "D": odds_draw, "A": odds_away}
+            odds_map[norm_key] = {
+                "H": odds_home, "D": odds_draw, "A": odds_away,
+                "Over25": odds_over25, "Under25": odds_under25,
+            }
 
         print(f"✅ Fetched odds for {len(odds_map)} soccer matches.")
         return odds_map
@@ -519,6 +537,7 @@ def fetch_fixtures_for_date(target_date: str = None):
         # data (falls back to its neutral training median) instead of being
         # steered toward the home team by a fabricated number.
         odds_h, odds_d, odds_a = None, None, None
+        odds_o25, odds_u25 = None, None
         lookup_key = f"{str(home_name).lower()} vs {str(away_name).lower()}"
         matched_odds = live_odds_feed.get(lookup_key)
 
@@ -532,6 +551,8 @@ def fetch_fixtures_for_date(target_date: str = None):
             odds_h = matched_odds["H"]
             odds_d = matched_odds["D"]
             odds_a = matched_odds["A"]
+            odds_o25 = matched_odds.get("Over25")
+            odds_u25 = matched_odds.get("Under25")
 
         status_short = fixture.get("status", {}).get("short", "NS")
         status = "FINISHED" if status_short in ["FT", "AET", "PEN"] else "SCHEDULED"
@@ -553,6 +574,8 @@ def fetch_fixtures_for_date(target_date: str = None):
             "odds_home":     odds_h,
             "odds_draw":     odds_d,
             "odds_away":     odds_a,
+            "odds_over25":   odds_o25,
+            "odds_under25":  odds_u25,
         })
 
     df = pd.DataFrame(parsed_matches)
@@ -713,6 +736,8 @@ def update_database(df, table_name="historical_matches"):
             odds_home  REAL,
             odds_draw  REAL,
             odds_away  REAL,
+            odds_over25  REAL,
+            odds_under25 REAL,
             home_shots    INTEGER,
             away_shots    INTEGER,
             home_shots_ot INTEGER,
@@ -721,11 +746,12 @@ def update_database(df, table_name="historical_matches"):
             away_corners  INTEGER
         )
     """)
-    # Migration for DBs that already exist from before these 4 columns were
+    # Migration for DBs that already exist from before these columns were
     # added (same ALTER-if-missing pattern used for the statistics backfill).
     existing_cols = {row[0] for row in conn.execute(f"DESCRIBE {table_name}").fetchall()}
     for col, coltype in [("home_team_id", "INTEGER"), ("away_team_id", "INTEGER"),
-                          ("home_ht_score", "INTEGER"), ("away_ht_score", "INTEGER")]:
+                          ("home_ht_score", "INTEGER"), ("away_ht_score", "INTEGER"),
+                          ("odds_over25", "REAL"), ("odds_under25", "REAL")]:
         if col not in existing_cols:
             conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {col} {coltype}")
     conn.register("df_temp", df)
@@ -739,11 +765,12 @@ def update_database(df, table_name="historical_matches"):
     #      match_id (e.g. status flipping to FINISHED) would have silently
     #      wiped any already-backfilled shots/corners data back to NULL,
     #      since this fetch never provides those columns. The upsert below
-    #      only ever touches the 12 columns it actually has data for.
+    #      only ever touches the columns it actually has data for.
     fetch_cols = ["match_id", "match_date", "match_time", "competition",
                   "home_team", "away_team", "home_team_id", "away_team_id",
                   "home_score", "away_score", "home_ht_score", "away_ht_score",
-                  "status", "odds_home", "odds_draw", "odds_away"]
+                  "status", "odds_home", "odds_draw", "odds_away",
+                  "odds_over25", "odds_under25"]
     col_list = ", ".join(fetch_cols)
     update_set = ", ".join(f"{c} = excluded.{c}" for c in fetch_cols if c != "match_id")
 
@@ -784,6 +811,8 @@ if __name__ == "__main__":
                 odds_home  REAL,
                 odds_draw  REAL,
                 odds_away  REAL,
+                odds_over25  REAL,
+                odds_under25 REAL,
                 home_shots    INTEGER,
                 away_shots    INTEGER,
                 home_shots_ot INTEGER,

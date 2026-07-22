@@ -137,7 +137,8 @@ def load_raw_data_from_db() -> pd.DataFrame:
                        ("home_ht_score", "REAL"), ("away_ht_score", "REAL"),
                        ("home_shots", "REAL"), ("away_shots", "REAL"),
                        ("home_shots_ot", "REAL"), ("away_shots_ot", "REAL"),
-                       ("home_corners", "REAL"), ("away_corners", "REAL")]:
+                       ("home_corners", "REAL"), ("away_corners", "REAL"),
+                       ("odds_over25", "REAL"), ("odds_under25", "REAL")]:
         if col in existing_cols:
             optional_selects.append(f"CAST({col} AS {cast}) AS {col}")
         else:
@@ -327,6 +328,19 @@ def _build_rolling_stats(df: pd.DataFrame, window: int = ROLLING_WINDOW) -> pd.D
     # Market-implied Over 2.5 probabilities (CSV training data only)
     if "Avg>2.5" in df.columns:
         df["ip_avg_over25"] = 1.0 / df["Avg>2.5"].replace(0, np.nan)
+    elif "odds_over25" in df.columns and "odds_under25" in df.columns:
+        # Live DuckDB schema. Normalize against both sides to remove the
+        # bookmaker's overround — same approach already used for
+        # ip_avg_home/ip_avg_draw below. Without this, ip_avg_over25 (the
+        # single most important feature for the Over 2.5 model, ~8%
+        # importance) was never computed for live predictions at all,
+        # since the live odds fetch only ever requested the h2h
+        # (match-winner) market, never totals (Over/Under). Every live
+        # Over 2.5 prediction was silently falling back to a constant
+        # training-median value for its top feature.
+        ou_margin = (1 / df["odds_over25"].replace(0, np.nan)
+                   + 1 / df["odds_under25"].replace(0, np.nan))
+        df["ip_avg_over25"] = (1 / df["odds_over25"].replace(0, np.nan)) / ou_margin
     if "B365>2.5" in df.columns:
         df["ip_b365_over25"] = 1.0 / df["B365>2.5"].replace(0, np.nan)
     for odds_h, odds_d, odds_a, pfx in [
