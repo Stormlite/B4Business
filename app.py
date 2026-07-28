@@ -268,10 +268,21 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
+@st.cache_data(ttl=1800, show_spinner=False)
+def _load_predictions(target_date_str: str) -> pd.DataFrame:
+    # Cached for 30 minutes. Predictions only meaningfully change once/day
+    # (the pipeline's automated commit), so this is a safe tradeoff — without
+    # it, every single UI interaction (switching Light/Dark, moving the
+    # confidence slider, anything) reran the full prediction pipeline from
+    # scratch. Profiled: _build_rolling_stats() alone takes ~21 of the ~23
+    # total seconds, recomputing rolling averages/standing across the full
+    # 10,000+ row history every time, regardless of what actually changed.
+    return score_todays_fixtures(target_date=target_date_str)
+
 # ── Load data ─────────────────────────────────────────────────────────────────
 with st.spinner("Loading predictions..."):
     try:
-        df = score_todays_fixtures(target_date=view_date_str)
+        df = _load_predictions(view_date_str)
     except Exception as e:
         st.error(f"❌ Could not load predictions: {e}")
         st.stop()
