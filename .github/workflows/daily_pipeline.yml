@@ -10,6 +10,16 @@ on:
                           # earlier to shrink the midnight data gap below.
   workflow_dispatch: # Allows manual trigger from the GitHub Actions tab
 
+permissions:
+  contents: write   # needed by the Commit and Push Changes step below.
+                     # Was missing entirely — this workflow was relying
+                     # solely on the repo-wide default Workflow permissions
+                     # setting (Settings -> Actions -> General), which is a
+                     # different thing from any personal access token's own
+                     # permissions. Confirmed as the cause of a real 403:
+                     # 'Permission to Stormlite/B4Business.git denied to
+                     # github-actions[bot]' on the Commit and Push step.
+
 jobs:
   run-pipeline:
     runs-on: ubuntu-latest
