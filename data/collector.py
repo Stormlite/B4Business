@@ -588,7 +588,7 @@ def fetch_todays_fixtures_from_api():
     return fetch_fixtures_for_date()
 
 
-def backfill_match_statistics(days_back: int = 3, limit: int = 50):
+def backfill_match_statistics(days_back: int = 3, limit: int = 40):
     """
     Backfills shots / shots-on-target / corners for recently finished matches
     collected via API-Football, using GET /fixtures/statistics?fixture={id}.
@@ -639,11 +639,12 @@ def backfill_match_statistics(days_back: int = 3, limit: int = 50):
     updated = 0
 
     # Confirmed via API-Football's own rate-limit docs: free tier is 10
-    # requests/minute (separate from a 100/day cap). 1.5s pacing was ~40
-    # req/min — 4x over — which is exactly why every call in the previous
-    # run hit a 429 even after retrying once. 6.5s gives a small safety
-    # margin under the true 6s-per-request minimum for 10/min.
-    MIN_INTERVAL = 6.5
+    # requests/minute AND 100 requests/day, both hard limits. 1.5s pacing was
+    # ~40 req/min — 4x over. 6.5s (~9.2 req/min) fixed the immediate 429s but
+    # left almost no margin against the hard 10/min ceiling — any jitter, or
+    # master's own concurrent fetch call landing in the same 60s window,
+    # could still tip it over. 8s (~7.5 req/min) leaves real headroom.
+    MIN_INTERVAL = 8.0
 
     for fixture_id, home_team, away_team in targets:
         try:

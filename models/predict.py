@@ -158,3 +158,91 @@ def score_todays_fixtures(target_date: str = None) -> pd.DataFrame:
         print(f"⚠️  Could not merge odds metadata: {e}")
 
     return df_output.sort_values("over_2_5_probability", ascending=False)
+
+
+PREDICTIONS_TABLE = "daily_predictions"
+
+
+def save_predictions(df: pd.DataFrame, target_date: str):
+    """
+    Persists scored predictions for a date into a dedicated DuckDB table, so
+    the Streamlit app can read them back near-instantly instead of re-running
+    the full pipeline (rolling stats over the whole match history, model
+    inference) on every page load. Called from the pipeline run, after
+    retraining — this is the same computation notify.py already does for its
+    own WhatsApp message, just now saved for the app to reuse too.
+    """
+    if df is None or df.empty:
+        return
+    conn = duckdb.connect(DB_PATH)
+    conn.execute(f"""
+        CREATE TABLE IF NOT EXISTS {PREDICTIONS_TABLE} (
+            match_id INTEGER,
+            match_date VARCHAR,
+            home_team VARCHAR,
+            away_team VARCHAR,
+            match_time VARCHAR,
+            over_2_5_probability DOUBLE,
+            over_0_5_probability DOUBLE,
+            corners_probability DOUBLE,
+            btts_probability DOUBLE,
+            prob_home_win DOUBLE,
+            prob_draw DOUBLE,
+            prob_away_win DOUBLE,
+            over25_confidence DOUBLE,
+            high_conf_pick BOOLEAN,
+            has_market_odds BOOLEAN,
+            odds_home REAL,
+            odds_draw REAL,
+            odds_away REAL,
+            computed_at TIMESTAMP,
+            PRIMARY KEY (match_id)
+        )
+    """)
+    to_save = df.copy()
+    to_save["match_date"] = target_date
+    to_save["computed_at"] = pd.Timestamp.now()
+    cols = ["match_id", "match_date", "home_team", "away_team", "match_time",
+            "over_2_5_probability", "over_0_5_probability", "corners_probability",
+            "btts_probability", "prob_home_win", "prob_draw", "prob_away_win",
+            "over25_confidence", "high_conf_pick", "has_market_odds",
+            "odds_home", "odds_draw", "odds_away", "computed_at"]
+    for c in cols:
+        if c not in to_save.columns:
+            to_save[c] = None
+    to_save = to_save[cols]
+
+    # Clear any previous predictions for this date first — fixture counts and
+    # match_ids can shift between runs (postponements, new fixtures added),
+    # so a plain upsert could leave stale rows behind. Then insert fresh.
+    conn.register("df_temp", to_save)
+    conn.execute(f"DELETE FROM {PREDICTIONS_TABLE} WHERE match_date = ?", [target_date])
+    conn.execute(f"INSERT INTO {PREDICTIONS_TABLE} SELECT * FROM df_temp")
+    conn.close()
+    print(f"✅ Saved {len(to_save)} precomputed predictions for {target_date}.")
+
+
+def load_precomputed_predictions(target_date: str) -> pd.DataFrame:
+    """
+    Reads back predictions saved by save_predictions(), if present. Returns
+    an empty DataFrame if the table doesn't exist yet or has no rows for
+    this date — callers should fall back to score_todays_fixtures() (a live
+    computation) in that case, so this never blocks a fresh deployment or a
+    date the pipeline hasn't precomputed for.
+    """
+    try:
+        conn = duckdb.connect(DB_PATH)
+        tables = {row[0] for row in conn.execute("SHOW TABLES").fetchall()}
+        if PREDICTIONS_TABLE not in tables:
+            conn.close()
+            return pd.DataFrame()
+        df = conn.execute(
+            f"SELECT * FROM {PREDICTIONS_TABLE} WHERE match_date = ?", [target_date]
+        ).df()
+        conn.close()
+        if df.empty:
+            return df
+        return df.sort_values("over_2_5_probability", ascending=False)
+    except Exception as e:
+        print(f"⚠️  Could not load precomputed predictions: {e}")
+        return pd.DataFrame()

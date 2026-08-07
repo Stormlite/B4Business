@@ -7,7 +7,7 @@ import streamlit as st
 import datetime
 import pandas as pd
 import joblib
-from models.predict import score_todays_fixtures
+from models.predict import score_todays_fixtures, load_precomputed_predictions
 from config import MODEL_PATH
 
 # ── SportyBet search links ───────────────────────────────────────────────────
@@ -270,13 +270,20 @@ st.markdown(f"""
 
 @st.cache_data(ttl=1800, show_spinner=False)
 def _load_predictions(target_date_str: str) -> pd.DataFrame:
-    # Cached for 30 minutes. Predictions only meaningfully change once/day
-    # (the pipeline's automated commit), so this is a safe tradeoff — without
-    # it, every single UI interaction (switching Light/Dark, moving the
-    # confidence slider, anything) reran the full prediction pipeline from
-    # scratch. Profiled: _build_rolling_stats() alone takes ~21 of the ~23
+    # Precomputed predictions (saved during the pipeline run by
+    # scripts/precompute_predictions.py) are a near-instant DB read — try
+    # that first. Falls back to a live computation only if the pipeline
+    # hasn't precomputed this date yet (e.g. right after deploying this
+    # change, or an unexpected gap in the schedule). The 30-minute cache
+    # below still applies either way, so even the fallback path only pays
+    # its cost once per date per cache window.
+    #
+    # Profiled the live path: _build_rolling_stats() alone takes ~21 of ~23
     # total seconds, recomputing rolling averages/standing across the full
-    # 10,000+ row history every time, regardless of what actually changed.
+    # 10,000+ row match history from scratch every time.
+    precomputed = load_precomputed_predictions(target_date_str)
+    if not precomputed.empty:
+        return precomputed
     return score_todays_fixtures(target_date=target_date_str)
 
 # ── Load data ─────────────────────────────────────────────────────────────────
