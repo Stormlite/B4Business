@@ -41,6 +41,18 @@ jobs:
             "https://api.github.com/repos/${{ github.repository }}/actions/workflows/daily_pipeline.yml/dispatches" \
             -d '{"ref":"v2"}'
 
+      - name: Wait for v2's API-Football Window to Clear
+        # API-Football free tier: 10 requests/minute AND 100 requests/day,
+        # both hard limits, shared across master and v2 since they use the
+        # same key. v2's own run makes 2 fetch calls (today + tomorrow) then
+        # up to 40 backfill calls at 8s spacing (~320s worst case) — all in
+        # the first two steps of its run, back to back. Without this delay,
+        # master's own fetch call below could land inside that same 60s
+        # window and push the combined rate over 10/min. 360s covers v2's
+        # worst-case API window plus buffer for its own runner startup
+        # latency (GitHub Actions runners can take 20-60s just to queue).
+        run: sleep 360
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
