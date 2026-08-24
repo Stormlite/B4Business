@@ -175,6 +175,26 @@ def save_predictions(df: pd.DataFrame, target_date: str):
     if df is None or df.empty:
         return
     conn = duckdb.connect(DB_PATH)
+
+    # Self-healing migration: a table may already exist with the old,
+    # broken schema (PRIMARY KEY (match_id) alone) from before this fix.
+    # That's exactly what caused a real production failure — a match_id
+    # showing up in both a 'today' and 'tomorrow' precompute run (fixtures
+    # near a date boundary) violated the single-column key. Detect via
+    # DuckDB's constraint introspection and drop+recreate if so; this is a
+    # pure cache table (always fully repopulated by the pipeline), so
+    # dropping it is safe and self-heals without needing manual migration.
+    existing_tables = {row[0] for row in conn.execute("SHOW TABLES").fetchall()}
+    if PREDICTIONS_TABLE in existing_tables:
+        pk_info = conn.execute(f"""
+            SELECT constraint_column_names FROM duckdb_constraints()
+            WHERE table_name = '{PREDICTIONS_TABLE}' AND constraint_type = 'PRIMARY KEY'
+        """).fetchone()
+        if pk_info and len(pk_info[0]) < 2:
+            print(f"⚠️  {PREDICTIONS_TABLE} has the old single-column primary key — "
+                  f"dropping and recreating with the fixed composite key.")
+            conn.execute(f"DROP TABLE {PREDICTIONS_TABLE}")
+
     conn.execute(f"""
         CREATE TABLE IF NOT EXISTS {PREDICTIONS_TABLE} (
             match_id INTEGER,
@@ -196,7 +216,7 @@ def save_predictions(df: pd.DataFrame, target_date: str):
             odds_draw REAL,
             odds_away REAL,
             computed_at TIMESTAMP,
-            PRIMARY KEY (match_id)
+            PRIMARY KEY (match_id, match_date)
         )
     """)
     to_save = df.copy()
