@@ -54,6 +54,15 @@ def dispatch_whatsapp_alerts():
 
     print(f"🔥 {len(picks)} high-confidence pick(s) found. Building message...")
 
+    # Distinguishes messages sent by master vs v2 — both branches now share
+    # this exact file (v2's notify.py was ported to master verbatim), so
+    # without this, messages from either pipeline are literally
+    # indistinguishable. GITHUB_REF_NAME is auto-injected by GitHub Actions
+    # into every run (the short branch/tag name) — no workflow YAML change
+    # needed, and it can't drift out of sync between branches since it's
+    # populated by the platform itself, not a value either branch defines.
+    source_branch = os.getenv("GITHUB_REF_NAME", "local")
+
     msg_body = "⚽ *B4Business Daily Picks* ⚽\n\n"
     for _, row in picks.iterrows():
         o25  = row["over_2_5_probability"] * 100
@@ -67,7 +76,7 @@ def dispatch_whatsapp_alerts():
             msg_body += f"  ·  Over 0.5: *{o05:.1f}%*"
         msg_body += f"  ·  BTTS: *{btts:.1f}%*\n\n"
 
-    msg_body += "_Automated forecast · B4Business ML pipeline_"
+    msg_body += f"_Automated forecast · B4Business ML pipeline ({source_branch})_"
 
     from twilio.rest import Client
     from twilio.base.exceptions import TwilioRestException
@@ -91,7 +100,7 @@ def dispatch_whatsapp_alerts():
             # this covers real usage (0-3 high-confidence picks/day so far).
             # Extra picks beyond 3 get folded into slot 3 as a "+N more" note
             # rather than dropped silently; unused slots show "—".
-            today_str = pd.Timestamp.now().strftime("%d %B %Y")
+            today_str = pd.Timestamp.now().strftime("%d %B %Y") + f" ({source_branch})"
             pick_lines = []
             for _, row in picks.iterrows():
                 o25 = row["over_2_5_probability"] * 100
@@ -126,7 +135,7 @@ def dispatch_whatsapp_alerts():
             message = client.messages.create(
                 content_sid=sandbox_template_sid,
                 content_variables=json.dumps({
-                    "1": "B4Business",
+                    "1": f"B4Business ({source_branch})",
                     "2": f"{len(picks)} High-Confidence Pick{'s' if len(picks) != 1 else ''}",
                     "3": "today",
                     "4": details,
