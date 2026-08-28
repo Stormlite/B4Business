@@ -266,3 +266,87 @@ def load_precomputed_predictions(target_date: str) -> pd.DataFrame:
     except Exception as e:
         print(f"⚠️  Could not load precomputed predictions: {e}")
         return pd.DataFrame()
+
+
+RECONCILED_TABLE = "reconciled_predictions"
+
+
+def reconcile_predictions():
+    """
+    Compares every precomputed prediction against the real outcome, once the
+    match has actually finished. This is what makes the confidence numbers
+    trustworthy — everything else (backtest CV, Brier scores) validates the
+    model against historical training data; this validates it against real
+    predictions this app actually made, on matches nobody knew the result of
+    yet when the prediction was saved.
+
+    Rebuilds reconciled_predictions from scratch each run rather than
+    upserting — the join is deterministic and the data volume is small, so a
+    full rebuild is simpler and avoids any of the primary-key/upsert
+    complexity that bit the daily_predictions table earlier.
+    """
+    conn = duckdb.connect(DB_PATH)
+    df = conn.execute("""
+        SELECT p.match_id, p.match_date, p.home_team, p.away_team,
+               p.over_2_5_probability, p.over_0_5_probability, p.corners_probability,
+               p.btts_probability, p.prob_home_win, p.prob_draw, p.prob_away_win,
+               p.high_conf_pick, p.has_market_odds,
+               m.home_score, m.away_score, m.home_corners, m.away_corners
+        FROM daily_predictions p
+        JOIN historical_matches m ON p.match_id = m.match_id
+        WHERE m.status = 'FINISHED'
+    """).df()
+    conn.close()
+
+    if df.empty:
+        print("ℹ️  No finished matches with saved predictions yet — nothing to reconcile.")
+        return
+
+    total_goals = df["home_score"] + df["away_score"]
+    df["actual_over25"] = total_goals > 2.5
+    df["actual_over05"] = total_goals > 0.5
+    df["actual_btts"] = (df["home_score"] > 0) & (df["away_score"] > 0)
+
+    # Nullable — many matches won't have corner data (only backfilled for a
+    # subset each run), so this must stay NULL rather than default to False.
+    total_corners = df["home_corners"] + df["away_corners"]
+    df["actual_corners_over"] = pd.array(
+        [None if pd.isna(v) else bool(v > 9.5) for v in total_corners], dtype="boolean"
+    )
+
+    df["actual_result"] = np.select(
+        [df["home_score"] > df["away_score"], df["home_score"] == df["away_score"]],
+        ["H", "D"], default="A"
+    )
+
+    keep_cols = ["match_id", "match_date", "home_team", "away_team",
+                 "over_2_5_probability", "over_0_5_probability", "corners_probability",
+                 "btts_probability", "prob_home_win", "prob_draw", "prob_away_win",
+                 "high_conf_pick", "has_market_odds",
+                 "actual_over25", "actual_over05", "actual_btts", "actual_corners_over",
+                 "actual_result", "home_score", "away_score"]
+    df = df[keep_cols]
+    df["reconciled_at"] = pd.Timestamp.now()
+
+    conn = duckdb.connect(DB_PATH)
+    conn.register("df_temp", df)
+    conn.execute(f"DROP TABLE IF EXISTS {RECONCILED_TABLE}")
+    conn.execute(f"CREATE TABLE {RECONCILED_TABLE} AS SELECT * FROM df_temp")
+    conn.close()
+    print(f"✅ Reconciled {len(df)} finished predictions against real outcomes.")
+
+
+def load_reconciled_predictions() -> pd.DataFrame:
+    """Reads back the reconciled track record. Empty DataFrame if not built yet."""
+    try:
+        conn = duckdb.connect(DB_PATH)
+        tables = {row[0] for row in conn.execute("SHOW TABLES").fetchall()}
+        if RECONCILED_TABLE not in tables:
+            conn.close()
+            return pd.DataFrame()
+        df = conn.execute(f"SELECT * FROM {RECONCILED_TABLE}").df()
+        conn.close()
+        return df
+    except Exception as e:
+        print(f"⚠️  Could not load reconciled predictions: {e}")
+        return pd.DataFrame()
