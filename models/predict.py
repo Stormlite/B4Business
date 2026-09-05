@@ -138,7 +138,13 @@ def score_todays_fixtures(target_date: str = None) -> pd.DataFrame:
         "prob_away_win":        prob_outcome[:, 2].round(4),
         "over25_confidence":    confidence.round(4),
         # Over 2.5 only — see HIGH_CONF_THRESHOLD comment above for why.
+        # high_conf_pick is the original merged flag (kept for backward
+        # compat — existing table/star-column logic in app.py relies on
+        # it). high_conf_over / high_conf_under split it into its two
+        # actual halves, for the separate Under 2.5 table/notification.
         "high_conf_pick":       (prob_over25 >= HIGH_CONF_THRESHOLD) | (prob_over25 <= (1 - HIGH_CONF_THRESHOLD)),
+        "high_conf_over":       prob_over25 >= HIGH_CONF_THRESHOLD,
+        "high_conf_under":      prob_over25 <= (1 - HIGH_CONF_THRESHOLD),
         # True only if real market odds were found for this fixture. When False,
         # the 1X2/outcome probabilities above were computed with a median-imputed
         # odds feature — still a real model output, but without the market's
@@ -211,6 +217,8 @@ def save_predictions(df: pd.DataFrame, target_date: str):
             prob_away_win DOUBLE,
             over25_confidence DOUBLE,
             high_conf_pick BOOLEAN,
+            high_conf_over BOOLEAN,
+            high_conf_under BOOLEAN,
             has_market_odds BOOLEAN,
             odds_home REAL,
             odds_draw REAL,
@@ -219,14 +227,20 @@ def save_predictions(df: pd.DataFrame, target_date: str):
             PRIMARY KEY (match_id, match_date)
         )
     """)
+    # Additive migration for tables that already exist without the two new
+    # columns — same checked-ALTER pattern already proven in collector.py.
+    existing_cols = {row[0] for row in conn.execute(f"DESCRIBE {PREDICTIONS_TABLE}").fetchall()}
+    for col in ["high_conf_over", "high_conf_under"]:
+        if col not in existing_cols:
+            conn.execute(f"ALTER TABLE {PREDICTIONS_TABLE} ADD COLUMN {col} BOOLEAN")
     to_save = df.copy()
     to_save["match_date"] = target_date
     to_save["computed_at"] = pd.Timestamp.now()
     cols = ["match_id", "match_date", "home_team", "away_team", "match_time",
             "over_2_5_probability", "over_0_5_probability", "corners_probability",
             "btts_probability", "prob_home_win", "prob_draw", "prob_away_win",
-            "over25_confidence", "high_conf_pick", "has_market_odds",
-            "odds_home", "odds_draw", "odds_away", "computed_at"]
+            "over25_confidence", "high_conf_pick", "high_conf_over", "high_conf_under",
+            "has_market_odds", "odds_home", "odds_draw", "odds_away", "computed_at"]
     for c in cols:
         if c not in to_save.columns:
             to_save[c] = None
@@ -235,9 +249,16 @@ def save_predictions(df: pd.DataFrame, target_date: str):
     # Clear any previous predictions for this date first — fixture counts and
     # match_ids can shift between runs (postponements, new fixtures added),
     # so a plain upsert could leave stale rows behind. Then insert fresh.
+    #
+    # Explicit column list on both sides — not "SELECT * FROM df_temp".
+    # SELECT * is positional: an ALTER TABLE migration appends new columns
+    # at the physical end of the table's schema, which doesn't match where
+    # they sit in `cols` above (found this the hard way — same bug class
+    # already fixed once before in collector.py's update_database()).
+    col_list = ", ".join(cols)
     conn.register("df_temp", to_save)
     conn.execute(f"DELETE FROM {PREDICTIONS_TABLE} WHERE match_date = ?", [target_date])
-    conn.execute(f"INSERT INTO {PREDICTIONS_TABLE} SELECT * FROM df_temp")
+    conn.execute(f"INSERT INTO {PREDICTIONS_TABLE} ({col_list}) SELECT {col_list} FROM df_temp")
     conn.close()
     print(f"✅ Saved {len(to_save)} precomputed predictions for {target_date}.")
 

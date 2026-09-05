@@ -354,53 +354,76 @@ with k3:
     </div>""", unsafe_allow_html=True)
 
 # ── High-confidence picks ─────────────────────────────────────────────────────
-hc_col = "high_conf_pick" if "high_conf_pick" in df_filtered.columns else None
-if hc_col:
-    df_hc = df_filtered[df_filtered[hc_col] == True]
+def render_pick_card(row):
+    o25   = row["over_2_5_probability"] * 100
+    o05   = row.get("over_0_5_probability", float("nan")) * 100
+    corn  = row.get("corners_probability", float("nan")) * 100
+    btts  = row.get("btts_probability", 0) * 100
+    hw    = row.get("prob_home_win", 0) * 100
+    dw    = row.get("prob_draw", 0) * 100
+    aw    = row.get("prob_away_win", 0) * 100
+    time_ = row.get("match_time", "—")
+    oddsH = row.get("odds_home", 0)
+    oddsD = row.get("odds_draw", 0)
+    oddsA = row.get("odds_away", 0)
+    odds_str = f"{oddsH:.2f} / {oddsD:.2f} / {oddsA:.2f}" if oddsH else "—"
+    has_odds = row.get("has_market_odds", True)  # default True for older cached predictions
+    conf  = row.get("over25_confidence", abs(row["over_2_5_probability"] - 0.5)) * 200
+
+    st.markdown(f"""
+    <div class="pick-card {'warn' if not has_odds else ''}">
+      <div class="pick-top">
+        <div>
+          <div class="match">{row['home_team']} <span style="color:var(--on-surface-variant);font-weight:400">vs</span> {row['away_team']}</div>
+          <div class="meta">⏰ {time_} &nbsp;·&nbsp; Odds <span class="odds">{odds_str}</span></div>
+        </div>
+        {confidence_ring(conf)}
+      </div>
+      <div class="pills">
+        <span class="pill pill-green">Over 2.5 &nbsp; {o25:.1f}%</span>
+        {f'<span class="pill pill-teal">Over 0.5 &nbsp; {o05:.1f}%</span>' if o05 == o05 else ''}
+        <span class="pill pill-blue">BTTS &nbsp; {btts:.1f}%</span>
+        {f'<span class="pill pill-amber">Corners 9.5 &nbsp; {corn:.1f}%</span>' if corn == corn else ''}
+        <span class="pill pill-purple">1X2 &nbsp; {hw:.0f}% / {dw:.0f}% / {aw:.0f}%</span>
+        {'' if has_odds else '<span class="pill pill-gray">⚠️ No market odds — 1X2 less reliable</span>'}
+      </div>
+      <div class="search-links">
+        <a href="{sportybet_search_url(row['home_team'])}" target="_blank" rel="noopener">🔍 {row['home_team']}</a>
+        <a href="{sportybet_search_url(row['away_team'])}" target="_blank" rel="noopener">🔍 {row['away_team']}</a>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+
+# ── High-confidence Over 2.5 picks ───────────────────────────────────────────
+# Uses high_conf_over specifically, not the merged high_conf_pick — that flag
+# was silently including confident-under picks in this section too (a pick
+# showing 33% next to a green "high confidence" star looked wrong, since it
+# was actually a confident UNDER call, just displayed here without saying so).
+over_col = "high_conf_over" if "high_conf_over" in df_filtered.columns else None
+if over_col:
+    df_hc = df_filtered[df_filtered[over_col] == True]
+elif "high_conf_pick" in df_filtered.columns:
+    df_hc = df_filtered[df_filtered["high_conf_pick"] == True]  # older cached predictions without the split columns
 else:
     df_hc = df_filtered[df_filtered["over_2_5_probability"] >= 0.62]
 
 if not df_hc.empty:
-    st.markdown('<div class="section-title">⭐ High-Confidence Selections</div>', unsafe_allow_html=True)
-    for _, row in df_hc.iterrows():
-        o25   = row["over_2_5_probability"] * 100
-        o05   = row.get("over_0_5_probability", float("nan")) * 100
-        corn  = row.get("corners_probability", float("nan")) * 100
-        btts  = row.get("btts_probability", 0) * 100
-        hw    = row.get("prob_home_win", 0) * 100
-        dw    = row.get("prob_draw", 0) * 100
-        aw    = row.get("prob_away_win", 0) * 100
-        time_ = row.get("match_time", "—")
-        oddsH = row.get("odds_home", 0)
-        oddsD = row.get("odds_draw", 0)
-        oddsA = row.get("odds_away", 0)
-        odds_str = f"{oddsH:.2f} / {oddsD:.2f} / {oddsA:.2f}" if oddsH else "—"
-        has_odds = row.get("has_market_odds", True)  # default True for older cached predictions
-        conf  = row.get("over25_confidence", abs(row["over_2_5_probability"] - 0.5)) * 200
+    st.markdown('<div class="section-title">⭐ High-Confidence Selections (Over 2.5)</div>', unsafe_allow_html=True)
+    for _, row in df_hc.sort_values("over_2_5_probability", ascending=False).iterrows():
+        render_pick_card(row)
 
-        st.markdown(f"""
-        <div class="pick-card {'warn' if not has_odds else ''}">
-          <div class="pick-top">
-            <div>
-              <div class="match">{row['home_team']} <span style="color:var(--on-surface-variant);font-weight:400">vs</span> {row['away_team']}</div>
-              <div class="meta">⏰ {time_} &nbsp;·&nbsp; Odds <span class="odds">{odds_str}</span></div>
-            </div>
-            {confidence_ring(conf)}
-          </div>
-          <div class="pills">
-            <span class="pill pill-green">Over 2.5 &nbsp; {o25:.1f}%</span>
-            {f'<span class="pill pill-teal">Over 0.5 &nbsp; {o05:.1f}%</span>' if o05 == o05 else ''}
-            <span class="pill pill-blue">BTTS &nbsp; {btts:.1f}%</span>
-            {f'<span class="pill pill-amber">Corners 9.5 &nbsp; {corn:.1f}%</span>' if corn == corn else ''}
-            <span class="pill pill-purple">1X2 &nbsp; {hw:.0f}% / {dw:.0f}% / {aw:.0f}%</span>
-            {'' if has_odds else '<span class="pill pill-gray">⚠️ No market odds — 1X2 less reliable</span>'}
-          </div>
-          <div class="search-links">
-            <a href="{sportybet_search_url(row['home_team'])}" target="_blank" rel="noopener">🔍 {row['home_team']}</a>
-            <a href="{sportybet_search_url(row['away_team'])}" target="_blank" rel="noopener">🔍 {row['away_team']}</a>
-          </div>
-        </div>
-        """, unsafe_allow_html=True)
+# ── Low-scoring watch (confident Under 2.5) ──────────────────────────────────
+under_col = "high_conf_under" if "high_conf_under" in df_filtered.columns else None
+if under_col:
+    df_under = df_filtered[df_filtered[under_col] == True]
+else:
+    df_under = df_filtered[df_filtered["over_2_5_probability"] <= 0.38]  # older cached predictions
+
+if not df_under.empty:
+    st.markdown('<div class="section-title">🧊 Low-Scoring Watch (Under 2.5)</div>', unsafe_allow_html=True)
+    for _, row in df_under.sort_values("over_2_5_probability", ascending=True).iterrows():
+        render_pick_card(row)
 
 # ── Full fixture table ────────────────────────────────────────────────────────
 st.markdown('<div class="section-title">📋 All Fixtures</div>', unsafe_allow_html=True)
@@ -429,7 +452,7 @@ if "odds_home" in df_filtered.columns:
                   if r.get("has_market_odds", True) else "⚠️ Not available",
         axis=1
     )
-if hc_col:
+if "high_conf_pick" in df_filtered.columns:
     table["⭐"] = df_filtered["high_conf_pick"].map({True: "✅", False: ""})
 
 # Custom HTML table (rather than st.dataframe) so it actually follows the
