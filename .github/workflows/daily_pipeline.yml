@@ -21,7 +21,47 @@ permissions:
                      # github-actions[bot]' on the Commit and Push step.
 
 jobs:
+  check-should-run:
+    # Guards ONLY the scheduled (cron) trigger — manual workflow_dispatch runs
+    # always proceed regardless of what already happened today. v2's own
+    # schedule trigger doesn't actually fire on its own (GitHub Actions only
+    # evaluates cron from the default branch — confirmed, master triggers v2
+    # via API instead), so in practice this mostly protects against v2 being
+    # manually triggered twice in the same day, or master's dispatch landing
+    # on a day v2 already completed some other way. Kept for consistency and
+    # defense-in-depth regardless.
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.check.outputs.should_run }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check if today's automated run already completed
+        id: check
+        run: |
+          if [ "${{ github.event_name }}" != "schedule" ]; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            echo "ℹ️  Manually triggered (workflow_dispatch) — always runs regardless of today's status."
+            exit 0
+          fi
+
+          TODAY=$(date -u +%Y-%m-%d)
+          LAST_DATE=$(git log --grep="Automated Daily Update" -1 --format=%cd --date=format:%Y-%m-%d -- . || echo "none")
+
+          if [ "$LAST_DATE" = "$TODAY" ]; then
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+            echo "⏭️  Already completed a full automated run today ($TODAY) — skipping this scheduled run to save API quota."
+          else
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            echo "▶️  No automated run yet today ($TODAY, last was $LAST_DATE) — proceeding."
+          fi
+
   run-pipeline:
+    needs: check-should-run
+    if: needs.check-should-run.outputs.should_run == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
